@@ -1,0 +1,68 @@
+# manifold
+
+A modular physics simulation and rendering framework in C++20, built for myself for experimenting with constraint-based dynamics, control systems, numerical solvers, and (eventually) fluid simulation, PDE methods, and neural network integration.
+
+## What this is
+
+The goal was to get a foundation upon which I can rapidly iterate and work on a number of projects. Each module (the solver, renderer, etc.), are meant to be self-contained libraries that can be composed into demos. 
+
+The solver architecture is **HEAVILY** (to a point where most of the structure is nearly identical) inspired by [Ange the Great's](https://github.com/ange-yaghi) constraint solver, reimplemented with Eigen for linear algebra and raylib for  rendering.
+
+**Current capabilities:**
+- 2D constraint-based rigid body solver (uses conjugate gradient)
+- Constraint types: link (pin joint), line (prismatic), fixed position, fixed rotation
+- Force generators: gravity, direct force application
+- PID controller with anti-windup
+- raylib-based renderer with a heavily Ange-inspired visual style 
+
+
+**Planned:**
+- More ODE/PDE solvers (RK4, spectral methods)
+- 3D rigid body dynamics (potentially, if we exclude the pain that is collision detection)
+- Fluid simulation (SPH, Eulerian grid)
+- CNN inference on flow fields
+- MPC / LQR controllers
+- Scene serialization
+
+## Building
+
+Requires CMake 3.16+ and a C++20 compiler. Dependencies (Eigen, raylib) are fetched automatically.
+
+```bash
+mkdir build && cd build
+cmake ..
+cmake --build .
+```
+
+
+## Project structure
+
+```
+manifold/
+├── include/manifold/       
+│   ├── solver/            
+│   │   ├── constraints/  
+│   │   └── forces/      
+│   ├── control/        
+│   └── renderer/      
+├── src/              
+│   └── solver/
+├── demos/
+│   └── cart_pendulum/
+└── tests/
+```
+
+Headers live under `include/manifold/`, sources under `src/`. Includes are namespaced (`#include <manifold/solver/rigid_body.h>`)
+
+## On AI usage
+My goal with this project was to understand the way implementations look, and not to test my grunt programming capabilities. I've made a point about learning each of these computational methods and schemes before beginning to design. AI was and is still used heavily when implementing my ideas. Additionally, after understanding the ideas behind these concepts (and trying my own initial implementations), I've continued to look online to learn how others have approached the problem, and have done a personal (albeit similar) approach based on that work. All sources will be listed.
+
+## References
+
+- [Ange the Great — Simple 2D Constraint Solver](https://github.com/ange-yaghi/simple-2d-constraint-solver)
+- Witkin & Baraff, *Physically Based Modeling* (SIGGRAPH course notes)
+- Catto, *Iterative Dynamics with Temporal Coherence* (GDC 2005)
+
+## License
+
+MIT

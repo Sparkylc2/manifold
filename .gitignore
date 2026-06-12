@@ -1,0 +1,23 @@
+# build
+build/
+cmake-build-*/
+out/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.cache/
+*~
+.DS_Store
+
+# compiled
+*.o
+*.a
+*.so
+*.dylib
+*.exe
+
+# dependencies (fetched by CMake)
+_deps/

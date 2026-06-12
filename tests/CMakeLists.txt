@@ -1,0 +1,2 @@
+add_executable(solver_tests solver/solver_tests.cpp)
+target_link_libraries(solver_tests PRIVATE manifold_solver)
