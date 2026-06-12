@@ -58,6 +58,9 @@ class LineConstraint : public Constraint {
     void set_kd(double kd) { m_kd = kd; }
     void set_ks(double ks) { m_ks = ks; }
 
+    const Vector2d &line_origin() const { return m_p0; }
+    const Vector2d &line_direction() const { return m_d; }
+
   private:
     Vector2d m_local;
     Vector2d m_p0;

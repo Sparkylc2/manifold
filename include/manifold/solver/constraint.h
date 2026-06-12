@@ -34,7 +34,11 @@ class Constraint {
     Vector2d F_xy[MAX_CONSTRAINT_COUNT][MAX_BODY_COUNT];
     double F_t[MAX_CONSTRAINT_COUNT][MAX_BODY_COUNT];
 
+    void set_visible(bool v) { m_visible = v; }
+    bool visible() const { return m_visible; }
+
   protected:
+    bool m_visible = true;
     int m_constraint_count;
 
     static void no_limits(Output *output) {

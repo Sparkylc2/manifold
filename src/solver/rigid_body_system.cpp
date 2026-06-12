@@ -1,34 +1,13 @@
 #include <manifold/solver/rigid_body_system.h>
 
 #include <assert.h>
-#include <chrono>
 #include <cmath>
 
 namespace manifold::Solver {
 
-RigidBodySystem::RigidBodySystem() {
-    m_ode_solve_microseconds = new long long[profiling_samples];
-    m_constraint_solve_microseconds = new long long[profiling_samples];
-    m_force_eval_microseconds = new long long[profiling_samples];
-    m_constraint_eval_microseconds = new long long[profiling_samples];
-    m_frame_index = 0;
+RigidBodySystem::RigidBodySystem() = default;
 
-    for (int i = 0; i < profiling_samples; i++) {
-        m_ode_solve_microseconds[i] = -1;
-        m_constraint_solve_microseconds[i] = -1;
-        m_force_eval_microseconds[i] = -1;
-        m_constraint_eval_microseconds[i] = -1;
-    }
-}
-
-RigidBodySystem::~RigidBodySystem() {
-    delete[] m_ode_solve_microseconds;
-    delete[] m_constraint_solve_microseconds;
-    delete[] m_force_eval_microseconds;
-    delete[] m_constraint_eval_microseconds;
-
-    m_state.clear();
-}
+RigidBodySystem::~RigidBodySystem() { m_state.clear(); }
 
 void RigidBodySystem::reset() {
     m_bodies.clear();
@@ -44,14 +23,13 @@ void RigidBodySystem::add_body(RigidBody *body) {
 }
 
 void RigidBodySystem::remove_body(RigidBody *body) {
-    // neat way to remove bodies i can't lie
     m_bodies[body->index] = m_bodies.back();
     m_bodies[body->index]->index = body->index;
     m_bodies.resize(m_bodies.size() - 1);
 }
 
 RigidBody *RigidBodySystem::get_body(int i) {
-    assert(i < m_bodies.size());
+    assert(i < (int)m_bodies.size());
     return m_bodies[i];
 }
 
@@ -82,38 +60,7 @@ int RigidBodySystem::get_full_constraint_count() const {
     for (Constraint *constraint : m_constraints) {
         count += constraint->constraint_count();
     }
-
     return count;
-}
-
-float RigidBodySystem::find_avg(long long *samples) {
-    long long accum = 0;
-    int count = 0;
-    for (int i = 0; i < profiling_samples; i++) {
-        if (samples[i] != -1) {
-            accum += samples[i];
-            count++;
-        }
-    }
-    if (count == 0)
-        return 0;
-    else
-        return (float)accum / count;
-}
-
-float RigidBodySystem::get_ode_solve_microseconds() const {
-    return find_avg(m_ode_solve_microseconds);
-}
-
-float RigidBodySystem::get_constraint_solve_microseconds() const {
-    return find_avg(m_constraint_solve_microseconds);
-}
-float RigidBodySystem::get_constraint_eval_microseconds() const {
-    return find_avg(m_constraint_eval_microseconds);
-}
-
-float RigidBodySystem::get_force_eval_microseconds() const {
-    return find_avg(m_force_eval_microseconds);
 }
 
 void RigidBodySystem::populate_state() {

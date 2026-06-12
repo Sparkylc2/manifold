@@ -22,3 +22,14 @@ FetchContent_Declare(
 set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(BUILD_GAMES OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(raylib)
+
+# --- raygui (header-only) ---
+FetchContent_Declare(
+    raygui
+    GIT_REPOSITORY https://github.com/raysan5/raygui.git
+    GIT_TAG        4.0
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(raygui)
+add_library(raygui INTERFACE)
+target_include_directories(raygui INTERFACE ${raygui_SOURCE_DIR}/src)

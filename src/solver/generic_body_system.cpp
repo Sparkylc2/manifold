@@ -1,5 +1,4 @@
 #include <cassert>
-#include <chrono>
 #include <manifold/solver/generic_body_system.h>
 
 namespace manifold::Solver {
@@ -14,7 +13,9 @@ void GenericRigidBodySystem::initialize(SLESolver *sle_solver,
 }
 
 void GenericRigidBodySystem::process(double dt, int steps) {
+#ifdef MANIFOLD_PROFILE
     long long ode_time = 0, constraint_time = 0, force_time = 0, eval_time = 0;
+#endif
 
     populate_state();
 
@@ -33,26 +34,29 @@ void GenericRigidBodySystem::process(double dt, int steps) {
         while (true) {
             const bool done = m_ode_solver->step(&m_state);
 
+#ifdef MANIFOLD_PROFILE
             long long et = 0, st = 0;
-
-            auto s0 = std::chrono::steady_clock::now();
-            process_forces();
-            auto s1 = std::chrono::steady_clock::now();
-
+            {
+                long long ft = 0;
+                PROFILE_SCOPE(ft);
+                process_forces();
+                force_time += ft;
+            }
             process_constraints(&et, &st);
-
-            auto s2 = std::chrono::steady_clock::now();
-            m_ode_solver->solve(&m_state);
-            auto s3 = std::chrono::steady_clock::now();
-
+            {
+                long long ot = 0;
+                PROFILE_SCOPE(ot);
+                m_ode_solver->solve(&m_state);
+                ode_time += ot;
+            }
             constraint_time += st;
             eval_time += et;
-            ode_time +=
-                std::chrono::duration_cast<std::chrono::microseconds>(s3 - s2)
-                    .count();
-            force_time +=
-                std::chrono::duration_cast<std::chrono::microseconds>(s1 - s0)
-                    .count();
+#else
+            process_forces();
+            long long et_unused = 0, st_unused = 0;
+            process_constraints(&et_unused, &st_unused);
+            m_ode_solver->solve(&m_state);
+#endif
 
             if (done)
                 break;
@@ -81,16 +85,19 @@ void GenericRigidBodySystem::process(double dt, int steps) {
         }
     }
 
-    m_ode_solve_microseconds[m_frame_index] = ode_time;
-    m_constraint_solve_microseconds[m_frame_index] = constraint_time;
-    m_force_eval_microseconds[m_frame_index] = force_time;
-    m_constraint_eval_microseconds[m_frame_index] = eval_time;
-    m_frame_index = (m_frame_index + 1) % profiling_samples;
+#ifdef MANIFOLD_PROFILE
+    m_prof_ode.push(ode_time);
+    m_prof_constraint_solve.push(constraint_time);
+    m_prof_constraint_eval.push(eval_time);
+    m_prof_force.push(force_time);
+#endif
 }
 
 void GenericRigidBodySystem::process_constraints(long long *eval_time,
                                                  long long *solve_time) {
+#ifdef MANIFOLD_PROFILE
     auto s0 = std::chrono::steady_clock::now();
+#endif
 
     const int n = get_body_count();
     const int m_f = get_full_constraint_count();
@@ -118,7 +125,7 @@ void GenericRigidBodySystem::process_constraints(long long *eval_time,
     m_iv.kd.resize(m_f);
 
     std::vector<Triplet<double>> J_triplets, J_dot_triplets;
-    J_triplets.reserve(m_f * 6); // worst case: 2 bodies * 3 DOF per row
+    J_triplets.reserve(m_f * 6);
     J_dot_triplets.reserve(m_f * 6);
 
     Constraint::Output output;
@@ -160,14 +167,18 @@ void GenericRigidBodySystem::process_constraints(long long *eval_time,
                    m_iv.J * (m_iv.M_inv.cwiseProduct(m_iv.F_ext)) +
                    m_iv.ks.cwiseProduct(m_iv.C) + m_iv.kd.cwiseProduct(Jq));
 
+#ifdef MANIFOLD_PROFILE
     auto s1 = std::chrono::steady_clock::now();
+#endif
 
     // solve J * M_inv * J^T * lambda = right
     bool solvable = m_sle_solver->solve(m_iv.J, m_iv.M_inv, m_iv.right,
                                         &m_iv.lambda, &m_iv.lambda);
     assert(solvable);
 
+#ifdef MANIFOLD_PROFILE
     auto s2 = std::chrono::steady_clock::now();
+#endif
 
     // compute accelerations: a = M_inv * (F_ext + J^T * lambda)
     VectorXd F_total = m_iv.F_ext + m_iv.J.transpose() * m_iv.lambda;
@@ -194,13 +205,17 @@ void GenericRigidBodySystem::process_constraints(long long *eval_time,
         }
     }
 
+#ifdef MANIFOLD_PROFILE
     auto s3 = std::chrono::steady_clock::now();
-
     *eval_time =
         std::chrono::duration_cast<std::chrono::microseconds>(s1 - s0 + s3 - s2)
             .count();
     *solve_time =
         std::chrono::duration_cast<std::chrono::microseconds>(s2 - s1).count();
+#else
+    *eval_time = 0;
+    *solve_time = 0;
+#endif
 }
 
 } // namespace manifold::Solver

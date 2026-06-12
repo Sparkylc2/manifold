@@ -1,5 +1,6 @@
 #pragma once
 
+#include <manifold/renderer/theme.h>
 #include <string>
 
 namespace manifold::Rendering {
@@ -21,34 +22,6 @@ constexpr int Right = 1;
 constexpr int Middle = 2;
 } // namespace mouse
 
-struct Color {
-    unsigned char r, g, b, a;
-    static Color rgba(unsigned char r, unsigned char g, unsigned char b,
-                      unsigned char a = 255) {
-        return {r, g, b, a};
-    }
-    static Color hex(unsigned int hex) {
-        return {static_cast<unsigned char>((hex >> 24) & 0xFF),
-                static_cast<unsigned char>((hex >> 16) & 0xFF),
-                static_cast<unsigned char>((hex >> 8) & 0xFF),
-                static_cast<unsigned char>(hex & 0xFF)};
-    }
-};
-
-namespace palette {
-inline Color background() { return Color::hex(0x0E1621FF); }
-inline Color foreground() { return Color::hex(0xC8D2DCFF); }
-inline Color shadow() { return Color::hex(0x060C14FF); }
-inline Color accent1() { return Color::hex(0xF44336FF); }
-inline Color accent2() { return Color::hex(0x42A5F5FF); }
-inline Color accent3() { return Color::hex(0x66BB6AFF); }
-inline Color grid_line() { return Color::hex(0x1A2530FF); }
-inline Color grid_axis() { return Color::hex(0x2A3A4AFF); }
-inline Color text() { return Color::hex(0xB0BEC5FF); }
-inline Color text_dim() { return Color::hex(0x607080FF); }
-inline Color panel_bg() { return Color::hex(0x0A1018C0); }
-} // namespace palette
-
 struct RendererConfig {
     int width = 1280;
     int height = 720;
@@ -56,6 +29,11 @@ struct RendererConfig {
     int target_fps = 60;
     bool vsync = true;
     bool msaa = true;
+    bool highdpi = true;
+    bool fxaa = false; // post-process FXAA (alternative to MSAA)
+    bool smooth_lines = true;
+    std::string font_path = ""; // empty = use default font
+    int font_size = 48;         // base rasterization size for custom fonts
 };
 
 class Renderer {
@@ -68,7 +46,7 @@ class Renderer {
     virtual void begin_frame() = 0;
     virtual void end_frame() = 0;
 
-    // world-space
+    // world-space drawing
     virtual void draw_bar(double x, double y, double theta, double length,
                           double width, Color fill, Color shadow_color) = 0;
     virtual void draw_disk(double x, double y, double theta, double radius,
@@ -84,11 +62,21 @@ class Renderer {
     virtual void draw_grid(double spacing, double extent, Color line_color,
                            Color axis_color) = 0;
 
-    // screen-space
+    // anti-aliased line (world-space) — uses vertex-alpha feathering or shader
+    virtual void draw_smooth_line(double x0, double y0, double x1, double y1,
+                                  double thickness, Color color) {
+        draw_line(x0, y0, x1, y1, thickness, color); // default fallback
+    }
+
+    // screen-space drawing
     virtual void draw_text(const std::string &text, int screen_x, int screen_y,
                            int font_size, Color color) = 0;
     virtual void draw_screen_line(int x0, int y0, int x1, int y1,
                                   float thickness, Color color) = 0;
+    virtual void draw_smooth_screen_line(int x0, int y0, int x1, int y1,
+                                         float thickness, Color color) {
+        draw_screen_line(x0, y0, x1, y1, thickness, color);
+    }
     virtual void draw_screen_rect(int x, int y, int w, int h, Color color) = 0;
 
     // camera

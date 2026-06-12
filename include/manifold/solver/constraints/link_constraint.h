@@ -93,6 +93,9 @@ class LinkConstraint : public Constraint {
     void set_ks(double ks) { m_ks = ks; }
     void set_kd(double kd) { m_kd = kd; }
 
+    const Vector2d &local_pos1() const { return m_local_1; }
+    const Vector2d &local_pos2() const { return m_local_2; }
+
   private:
     double m_max_force;
 

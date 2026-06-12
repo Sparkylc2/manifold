@@ -2,6 +2,7 @@
 
 #include <manifold/solver/constraint.h>
 #include <manifold/solver/force_generator.h>
+#include <manifold/solver/profiler.h>
 #include <manifold/solver/rigid_body.h>
 #include <manifold/solver/system_state.h>
 
@@ -12,7 +13,7 @@ namespace manifold::Solver {
 
 class RigidBodySystem {
   public:
-    static const int profiling_samples = 60 * 10;
+    static constexpr int profiling_samples = 600;
 
   public:
     RigidBodySystem();
@@ -31,6 +32,8 @@ class RigidBodySystem {
     void add_force_generator(ForceGenerator *fg);
     void remove_force_generator(ForceGenerator *fg);
 
+    Constraint *get_constraint(int i) { return m_constraints[i]; }
+
     int get_body_count() const { return (int)m_bodies.size(); }
     int get_constraint_count() const { return (int)m_constraints.size(); }
     int get_force_generator_count() const {
@@ -38,18 +41,29 @@ class RigidBodySystem {
     }
     int get_full_constraint_count() const;
 
-    float get_ode_solve_microseconds() const;
-    float get_constraint_solve_microseconds() const;
-    float get_constraint_eval_microseconds() const;
-    float get_force_eval_microseconds() const;
+#ifdef MANIFOLD_PROFILE
+    float get_ode_solve_microseconds() const {
+        return (float)m_prof_ode.average();
+    }
+    float get_constraint_solve_microseconds() const {
+        return (float)m_prof_constraint_solve.average();
+    }
+    float get_constraint_eval_microseconds() const {
+        return (float)m_prof_constraint_eval.average();
+    }
+    float get_force_eval_microseconds() const {
+        return (float)m_prof_force.average();
+    }
+#else
+    float get_ode_solve_microseconds() const { return 0; }
+    float get_constraint_solve_microseconds() const { return 0; }
+    float get_constraint_eval_microseconds() const { return 0; }
+    float get_force_eval_microseconds() const { return 0; }
+#endif
 
     inline const SystemState *state() const { return &m_state; }
 
-    // double m_bias_factor;
-
   protected:
-    static float find_avg(long long *samples);
-
     void populate_state();
     void populate_mass_matrices(MatrixXd *M, MatrixXd *M_inv);
     void process_forces();
@@ -61,17 +75,12 @@ class RigidBodySystem {
 
     SystemState m_state;
 
-    long long *m_ode_solve_microseconds;
-    long long *m_constraint_solve_microseconds;
-    long long *m_force_eval_microseconds;
-    long long *m_constraint_eval_microseconds;
-    long long m_frame_index;
-
-    /* --- todo: what? --- */
-    void reindex_bodies();
-    void propagate_to_bodies();
-    void solve_constraints(double dt);
-    /* ------------------- */
+#ifdef MANIFOLD_PROFILE
+    RingBuffer<long long, profiling_samples> m_prof_ode;
+    RingBuffer<long long, profiling_samples> m_prof_constraint_solve;
+    RingBuffer<long long, profiling_samples> m_prof_constraint_eval;
+    RingBuffer<long long, profiling_samples> m_prof_force;
+#endif
 };
 
 } // namespace manifold::Solver

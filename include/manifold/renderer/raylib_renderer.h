@@ -4,8 +4,12 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <iostream>
 #include <raylib.h>
 #include <raymath.h>
+#include <rlgl.h>
+#include <string>
 
 namespace manifold::Rendering {
 
@@ -20,23 +24,86 @@ class RaylibRenderer : public Renderer {
     RaylibRenderer() : m_cam_x(0), m_cam_y(0), m_zoom(60.0) {}
 
     bool init(const RendererConfig &config) override {
-        if (config.msaa)
-            SetConfigFlags(FLAG_MSAA_4X_HINT);
+        unsigned int flags = FLAG_WINDOW_RESIZABLE;
+        if (config.msaa && !config.fxaa)
+            flags |= FLAG_MSAA_4X_HINT;
         if (config.vsync)
-            SetConfigFlags(FLAG_VSYNC_HINT);
-        SetConfigFlags(FLAG_WINDOW_RESIZABLE);
+            flags |= FLAG_VSYNC_HINT;
+        if (config.highdpi)
+            flags |= FLAG_WINDOW_HIGHDPI;
+        SetConfigFlags(flags);
+
         InitWindow(config.width, config.height, config.title.c_str());
         SetTargetFPS(config.target_fps);
+        SetExitKey(KEY_NULL);
+
+        m_use_fxaa = config.fxaa;
+        m_use_smooth_lines = config.smooth_lines;
+
+        // font setup
+        // std::cout << "init" << config.font_path << std::endl;
+        load_font("../" + config.font_path, config.font_size);
+
+        // FXAA post-processing setup
+        if (m_use_fxaa) {
+            init_fxaa();
+        }
+
+        // smooth line shader
+        if (m_use_smooth_lines) {
+            init_smooth_line_shader();
+        }
+
         return true;
     }
 
-    void shutdown() override { CloseWindow(); }
-    bool should_close() override { return WindowShouldClose(); }
-    void begin_frame() override {
-        BeginDrawing();
-        ClearBackground(detail::to_rl(Rendering::palette::background()));
+    void shutdown() override {
+        if (m_has_custom_font)
+            UnloadFont(m_font);
+        if (m_use_fxaa) {
+            UnloadRenderTexture(m_render_target);
+            UnloadShader(m_fxaa_shader);
+        }
+        if (m_smooth_line_shader_loaded)
+            UnloadShader(m_smooth_line_shader);
+        CloseWindow();
     }
-    void end_frame() override { EndDrawing(); }
+
+    bool should_close() override { return WindowShouldClose(); }
+
+    void begin_frame() override {
+        // resize render target if window changed
+        if (m_use_fxaa) {
+            int sw = GetScreenWidth(), sh = GetScreenHeight();
+            if (sw != m_rt_width || sh != m_rt_height) {
+                UnloadRenderTexture(m_render_target);
+                m_render_target = LoadRenderTexture(sw, sh);
+                m_rt_width = sw;
+                m_rt_height = sh;
+                set_fxaa_resolution();
+            }
+            BeginTextureMode(m_render_target);
+        } else {
+            BeginDrawing();
+        }
+        ClearBackground(detail::to_rl(palette::background()));
+    }
+
+    void end_frame() override {
+        if (m_use_fxaa) {
+            EndTextureMode();
+            BeginDrawing();
+            BeginShaderMode(m_fxaa_shader);
+            // render texture is flipped vertically in OpenGL
+            DrawTextureRec(m_render_target.texture,
+                           {0, 0, (float)m_rt_width, -(float)m_rt_height},
+                           {0, 0}, ::Color{255, 255, 255, 255});
+            EndShaderMode();
+            EndDrawing();
+        } else {
+            EndDrawing();
+        }
+    }
 
     // === world-space ===
 
@@ -65,6 +132,12 @@ class RaylibRenderer : public Renderer {
                    Color color) override {
         DrawLineEx({w2sx(x0), w2sy(y0)}, {w2sx(x1), w2sy(y1)}, (float)thickness,
                    detail::to_rl(color));
+    }
+
+    void draw_smooth_line(double x0, double y0, double x1, double y1,
+                          double thickness, Color color) override {
+        draw_aa_line(w2sx(x0), w2sy(y0), w2sx(x1), w2sy(y1), (float)thickness,
+                     color);
     }
 
     void draw_circle(double x, double y, double radius, Color color) override {
@@ -120,13 +193,24 @@ class RaylibRenderer : public Renderer {
 
     void draw_text(const std::string &text, int sx, int sy, int font_size,
                    Color color) override {
-        DrawText(text.c_str(), sx, sy, font_size, detail::to_rl(color));
+        if (m_has_custom_font) {
+            draw_text_proportional(m_font, text.c_str(), (float)sx, (float)sy,
+                                   (float)font_size, detail::to_rl(color));
+        } else {
+            DrawText(text.c_str(), sx, sy, font_size, detail::to_rl(color));
+        }
     }
 
     void draw_screen_line(int x0, int y0, int x1, int y1, float thickness,
                           Color color) override {
         DrawLineEx({(float)x0, (float)y0}, {(float)x1, (float)y1}, thickness,
                    detail::to_rl(color));
+    }
+
+    void draw_smooth_screen_line(int x0, int y0, int x1, int y1,
+                                 float thickness, Color color) override {
+        draw_aa_line((float)x0, (float)y0, (float)x1, (float)y1, thickness,
+                     color);
     }
 
     void draw_screen_rect(int x, int y, int w, int h, Color color) override {
@@ -177,12 +261,16 @@ class RaylibRenderer : public Renderer {
     float delta_time() const override { return GetFrameTime(); }
 
   private:
+    // ---- coordinate transforms ----
+
     float w2sx(double wx) const {
         return (float)((wx - m_cam_x) * m_zoom + GetScreenWidth() / 2.0);
     }
     float w2sy(double wy) const {
         return (float)(-(wy - m_cam_y) * m_zoom + GetScreenHeight() / 2.0);
     }
+
+    // ---- rounded bar ----
 
     void draw_rounded_bar(double x, double y, double theta, double length,
                           double width, Color color) {
@@ -197,7 +285,181 @@ class RaylibRenderer : public Renderer {
         DrawCircleV({cx - hdx, cy - hdy}, r, detail::to_rl(color));
     }
 
+    // ---- anti-aliased line via vertex alpha quads ----
+
+    void draw_aa_line(float x0, float y0, float x1, float y1, float thickness,
+                      Color color) {
+        float dx = x1 - x0, dy = y1 - y0;
+        float len = std::sqrt(dx * dx + dy * dy);
+        if (len < 0.001f)
+            return;
+
+        // perpendicular normal
+        float nx = -dy / len, ny = dx / len;
+
+        float half = thickness * 0.5f;
+        float feather = 1.5f; // AA border in pixels
+
+        float outer = half + feather;
+
+        // vertices: 4 outer + 4 inner = 8 total
+        // outer edge (alpha 0)
+        float ox0l = x0 + nx * outer, oy0l = y0 + ny * outer;
+        float ox1l = x1 + nx * outer, oy1l = y1 + ny * outer;
+        float ox0r = x0 - nx * outer, oy0r = y0 - ny * outer;
+        float ox1r = x1 - nx * outer, oy1r = y1 - ny * outer;
+
+        // inner edge (full alpha)
+        float ix0l = x0 + nx * half, iy0l = y0 + ny * half;
+        float ix1l = x1 + nx * half, iy1l = y1 + ny * half;
+        float ix0r = x0 - nx * half, iy0r = y0 - ny * half;
+        float ix1r = x1 - nx * half, iy1r = y1 - ny * half;
+
+        ::Color full = {color.r, color.g, color.b, color.a};
+        ::Color zero = {color.r, color.g, color.b, 0};
+
+        rlSetTexture(rlGetTextureIdDefault());
+        rlBegin(RL_TRIANGLES);
+
+        // top feather strip (outer_left -> inner_left)
+        rlColor4ub(zero.r, zero.g, zero.b, zero.a);
+        rlVertex2f(ox0l, oy0l);
+        rlColor4ub(full.r, full.g, full.b, full.a);
+        rlVertex2f(ix0l, iy0l);
+        rlColor4ub(zero.r, zero.g, zero.b, zero.a);
+        rlVertex2f(ox1l, oy1l);
+
+        rlColor4ub(zero.r, zero.g, zero.b, zero.a);
+        rlVertex2f(ox1l, oy1l);
+        rlColor4ub(full.r, full.g, full.b, full.a);
+        rlVertex2f(ix0l, iy0l);
+        rlColor4ub(full.r, full.g, full.b, full.a);
+        rlVertex2f(ix1l, iy1l);
+
+        // center solid strip (inner_left -> inner_right)
+        rlColor4ub(full.r, full.g, full.b, full.a);
+        rlVertex2f(ix0l, iy0l);
+        rlVertex2f(ix0r, iy0r);
+        rlVertex2f(ix1l, iy1l);
+
+        rlColor4ub(full.r, full.g, full.b, full.a);
+        rlVertex2f(ix1l, iy1l);
+        rlVertex2f(ix0r, iy0r);
+        rlVertex2f(ix1r, iy1r);
+
+        // bottom feather strip (inner_right -> outer_right)
+        rlColor4ub(full.r, full.g, full.b, full.a);
+        rlVertex2f(ix0r, iy0r);
+        rlColor4ub(zero.r, zero.g, zero.b, zero.a);
+        rlVertex2f(ox0r, oy0r);
+        rlColor4ub(full.r, full.g, full.b, full.a);
+        rlVertex2f(ix1r, iy1r);
+
+        rlColor4ub(full.r, full.g, full.b, full.a);
+        rlVertex2f(ix1r, iy1r);
+        rlColor4ub(zero.r, zero.g, zero.b, zero.a);
+        rlVertex2f(ox0r, oy0r);
+        rlColor4ub(zero.r, zero.g, zero.b, zero.a);
+        rlVertex2f(ox1r, oy1r);
+
+        rlEnd();
+        rlSetTexture(0);
+    }
+
+    // ---- font loading ----
+
+    void load_font(const std::string &path, int base_size) {
+        m_font_base_size = base_size;
+        if (!path.empty() && FileExists(path.c_str())) {
+            m_font = LoadFontEx(path.c_str(), base_size, nullptr, 0);
+            SetTextureFilter(m_font.texture, TEXTURE_FILTER_BILINEAR);
+            m_has_custom_font = true;
+        } else {
+            // apply bilinear filtering to default font for slightly better
+            // quality
+            Font def = GetFontDefault();
+            SetTextureFilter(def.texture, TEXTURE_FILTER_BILINEAR);
+            m_has_custom_font = false;
+        }
+    }
+
+    void draw_text_proportional(::Font font, const char *text, float x, float y,
+                                float font_size, ::Color color) {
+        float scale = font_size / (float)font.baseSize;
+        float cursor = x;
+
+        for (int i = 0; text[i] != '\0';) {
+            int bytes = 0;
+            int codepoint = GetCodepoint(&text[i], &bytes);
+
+            int glyph_index = GetGlyphIndex(font, codepoint);
+            GlyphInfo info = GetGlyphInfo(font, codepoint);
+            Rectangle src = GetGlyphAtlasRec(font, codepoint);
+
+            if (codepoint != ' ') {
+                Rectangle dst = {cursor + info.offsetX * scale,
+                                 y + info.offsetY * scale, src.width * scale,
+                                 src.height * scale};
+                DrawTexturePro(font.texture, src, dst, {0, 0}, 0, color);
+            }
+
+            float advance = (info.advanceX == 0) ? src.width * scale
+                                                 : (float)info.advanceX * scale;
+            cursor += advance;
+
+            i += bytes;
+        }
+    }
+
+    // ---- FXAA setup ----
+
+    void init_fxaa() {
+        int sw = GetScreenWidth(), sh = GetScreenHeight();
+        m_render_target = LoadRenderTexture(sw, sh);
+        m_rt_width = sw;
+        m_rt_height = sh;
+
+        m_fxaa_shader = LoadShader(nullptr, "assets/shaders/fxaa.fs");
+        m_fxaa_resolution_loc = GetShaderLocation(m_fxaa_shader, "resolution");
+        set_fxaa_resolution();
+    }
+
+    void set_fxaa_resolution() {
+        float res[2] = {(float)m_rt_width, (float)m_rt_height};
+        SetShaderValue(m_fxaa_shader, m_fxaa_resolution_loc, res,
+                       SHADER_UNIFORM_VEC2);
+    }
+
+    // ---- smooth line shader setup ----
+
+    void init_smooth_line_shader() {
+        if (FileExists("assets/shaders/smooth_line.fs")) {
+            m_smooth_line_shader =
+                LoadShader(nullptr, "assets/shaders/smooth_line.fs");
+            m_smooth_line_shader_loaded = true;
+        }
+    }
+
+    // ---- state ----
+
     double m_cam_x, m_cam_y, m_zoom;
+
+    // font
+    Font m_font = {};
+    int m_font_base_size = 48;
+    bool m_has_custom_font = false;
+
+    // FXAA
+    bool m_use_fxaa = false;
+    RenderTexture2D m_render_target = {};
+    Shader m_fxaa_shader = {};
+    int m_fxaa_resolution_loc = -1;
+    int m_rt_width = 0, m_rt_height = 0;
+
+    // smooth lines
+    bool m_use_smooth_lines = false;
+    Shader m_smooth_line_shader = {};
+    bool m_smooth_line_shader_loaded = false;
 };
 
 } // namespace manifold::Rendering

@@ -1,2 +1,0 @@
-add_executable(cart_pendulum main.cpp)
-target_link_libraries(cart_pendulum PRIVATE manifold_solver manifold_control manifold_renderer)
