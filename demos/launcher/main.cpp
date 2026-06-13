@@ -63,7 +63,7 @@ int main(int argc, char *argv[]) {
     config.msaa = true;
     config.highdpi = true;
     config.smooth_lines = true;
-    config.font_path = "assets/fonts/SpaceGrotesk-Medium.ttf";
+    config.font_path = "assets/fonts/Inter-Medium.ttf";
 
     if (!renderer.init(config))
         return 1;

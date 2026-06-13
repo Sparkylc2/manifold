@@ -4,10 +4,10 @@
 
 namespace manifold::Solver {
 
-class GravityForceGenerator : public ForceGenerator {
+class UniformGravityForceGenerator : public ForceGenerator {
   public:
-    GravityForceGenerator() : m_g(0, 9.81) {}
-    ~GravityForceGenerator() override = default;
+    UniformGravityForceGenerator() : m_g(0, 9.81) {}
+    ~UniformGravityForceGenerator() override = default;
 
     void apply(SystemState *state) override {
         for (int i = 0; i < state->num_b; i++) {

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "manifold/solver/forces/uniform_gravity.h"
 #include <manifold/control/pid.h>
 #include <manifold/renderer/demo_base.h>
 #include <manifold/renderer/joint_visuals.h>
@@ -7,7 +8,7 @@
 #include <manifold/solver/constraints/line_constraint.h>
 #include <manifold/solver/constraints/link_constraint.h>
 #include <manifold/solver/forces/direct_force.h>
-#include <manifold/solver/forces/gravity.h>
+#include <manifold/solver/forces/uniform_gravity.h>
 #include <manifold/solver/gaussian_elimination_sle_solver.h>
 #include <manifold/solver/generic_body_system.h>
 #include <manifold/solver/rk4_ode_solver.h>
@@ -344,7 +345,7 @@ class CartPendulumDemo : public DemoBase {
     Solver::LineConstraint m_rail;
     Solver::FixedRotationConstraint m_cart_rot;
     Solver::LinkConstraint m_pivot;
-    Solver::GravityForceGenerator m_gravity;
+    Solver::UniformGravityForceGenerator m_gravity;
     Solver::DirectForceGenerator m_control_force;
 
     Control::PIDController m_pid_angle;

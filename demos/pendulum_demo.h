@@ -3,7 +3,7 @@
 #include <manifold/renderer/demo_base.h>
 #include <manifold/solver/constraints/fixed_position_constraint.h>
 #include <manifold/solver/constraints/link_constraint.h>
-#include <manifold/solver/forces/gravity.h>
+#include <manifold/solver/forces/uniform_gravity.h>
 #include <manifold/solver/gaussian_elimination_sle_solver.h>
 #include <manifold/solver/generic_body_system.h>
 #include <manifold/solver/rk4_ode_solver.h>
@@ -159,7 +159,7 @@ class PendulumDemo : public DemoBase {
     Solver::RigidBody m_anchor, m_bar;
     Solver::FixedPositionConstraint m_pin;
     Solver::LinkConstraint m_link;
-    Solver::GravityForceGenerator m_gravity;
+    Solver::UniformGravityForceGenerator m_gravity;
 
     PlotWidget m_plot_energy, m_plot_angle, m_plot_drift;
 };

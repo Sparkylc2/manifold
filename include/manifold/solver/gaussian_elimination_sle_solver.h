@@ -13,6 +13,7 @@ class GaussianEliminationSLESolver : public SLESolver {
 
         // form A = J * diag(W) * J^T
         MatrixXd A = MatrixXd(J) * W.asDiagonal() * MatrixXd(J).transpose();
+        A.diagonal().array() += 1e-6; // Tikhonov regularization
 
         // direct solve via partial-pivot LU
         *result = A.partialPivLu().solve(right);

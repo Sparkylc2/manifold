@@ -147,9 +147,11 @@ class RaylibRenderer : public Renderer {
 
     void draw_rect(double x, double y, double w, double h,
                    Color color) override {
-        DrawRectangle((int)w2sx(x - w / 2), (int)w2sy(y + h / 2),
-                      (int)(w * m_zoom), (int)(h * m_zoom),
-                      detail::to_rl(color));
+        float sx = w2sx(x - w / 2);
+        float sy = w2sy(y + h / 2);
+        float sw = (float)(w * m_zoom);
+        float sh = (float)(h * m_zoom);
+        DrawRectangleV({sx, sy}, {sw, sh}, detail::to_rl(color));
     }
 
     void draw_arrow(double x0, double y0, double x1, double y1,
@@ -294,76 +296,36 @@ class RaylibRenderer : public Renderer {
         if (len < 0.001f)
             return;
 
-        // perpendicular normal
         float nx = -dy / len, ny = dx / len;
+        float half = thickness * 0.5f + 1.5f; // extra for AA margin
 
-        float half = thickness * 0.5f;
-        float feather = 1.5f; // AA border in pixels
+        unsigned char cr = color.r, cg = color.g, cb = color.b, ca = color.a;
 
-        float outer = half + feather;
+        rlDrawRenderBatchActive();
 
-        // vertices: 4 outer + 4 inner = 8 total
-        // outer edge (alpha 0)
-        float ox0l = x0 + nx * outer, oy0l = y0 + ny * outer;
-        float ox1l = x1 + nx * outer, oy1l = y1 + ny * outer;
-        float ox0r = x0 - nx * outer, oy0r = y0 - ny * outer;
-        float ox1r = x1 - nx * outer, oy1r = y1 - ny * outer;
-
-        // inner edge (full alpha)
-        float ix0l = x0 + nx * half, iy0l = y0 + ny * half;
-        float ix1l = x1 + nx * half, iy1l = y1 + ny * half;
-        float ix0r = x0 - nx * half, iy0r = y0 - ny * half;
-        float ix1r = x1 - nx * half, iy1r = y1 - ny * half;
-
-        ::Color full = {color.r, color.g, color.b, color.a};
-        ::Color zero = {color.r, color.g, color.b, 0};
+        if (m_smooth_line_shader_loaded)
+            BeginShaderMode(m_smooth_line_shader);
 
         rlSetTexture(rlGetTextureIdDefault());
-        rlBegin(RL_TRIANGLES);
+        rlBegin(RL_QUADS);
 
-        // top feather strip (outer_left -> inner_left)
-        rlColor4ub(zero.r, zero.g, zero.b, zero.a);
-        rlVertex2f(ox0l, oy0l);
-        rlColor4ub(full.r, full.g, full.b, full.a);
-        rlVertex2f(ix0l, iy0l);
-        rlColor4ub(zero.r, zero.g, zero.b, zero.a);
-        rlVertex2f(ox1l, oy1l);
+        rlColor4ub(cr, cg, cb, ca);
 
-        rlColor4ub(zero.r, zero.g, zero.b, zero.a);
-        rlVertex2f(ox1l, oy1l);
-        rlColor4ub(full.r, full.g, full.b, full.a);
-        rlVertex2f(ix0l, iy0l);
-        rlColor4ub(full.r, full.g, full.b, full.a);
-        rlVertex2f(ix1l, iy1l);
-
-        // center solid strip (inner_left -> inner_right)
-        rlColor4ub(full.r, full.g, full.b, full.a);
-        rlVertex2f(ix0l, iy0l);
-        rlVertex2f(ix0r, iy0r);
-        rlVertex2f(ix1l, iy1l);
-
-        rlColor4ub(full.r, full.g, full.b, full.a);
-        rlVertex2f(ix1l, iy1l);
-        rlVertex2f(ix0r, iy0r);
-        rlVertex2f(ix1r, iy1r);
-
-        // bottom feather strip (inner_right -> outer_right)
-        rlColor4ub(full.r, full.g, full.b, full.a);
-        rlVertex2f(ix0r, iy0r);
-        rlColor4ub(zero.r, zero.g, zero.b, zero.a);
-        rlVertex2f(ox0r, oy0r);
-        rlColor4ub(full.r, full.g, full.b, full.a);
-        rlVertex2f(ix1r, iy1r);
-
-        rlColor4ub(full.r, full.g, full.b, full.a);
-        rlVertex2f(ix1r, iy1r);
-        rlColor4ub(zero.r, zero.g, zero.b, zero.a);
-        rlVertex2f(ox0r, oy0r);
-        rlColor4ub(zero.r, zero.g, zero.b, zero.a);
-        rlVertex2f(ox1r, oy1r);
+        // UV.y: 0 at top edge, 0.5 at center, 1 at bottom edge
+        rlTexCoord2f(0.0f, 0.0f);
+        rlVertex2f(x0 + nx * half, y0 + ny * half);
+        rlTexCoord2f(1.0f, 0.0f);
+        rlVertex2f(x1 + nx * half, y1 + ny * half);
+        rlTexCoord2f(1.0f, 1.0f);
+        rlVertex2f(x1 - nx * half, y1 - ny * half);
+        rlTexCoord2f(0.0f, 1.0f);
+        rlVertex2f(x0 - nx * half, y0 - ny * half);
 
         rlEnd();
         rlSetTexture(0);
+
+        if (m_smooth_line_shader_loaded)
+            EndShaderMode();
     }
 
     // ---- font loading ----
@@ -371,12 +333,21 @@ class RaylibRenderer : public Renderer {
     void load_font(const std::string &path, int base_size) {
         m_font_base_size = base_size;
         if (!path.empty() && FileExists(path.c_str())) {
-            m_font = LoadFontEx(path.c_str(), base_size, nullptr, 0);
+            int codepoints[256];
+            int count = 0;
+            for (int i = 32; i < 256; ++i)
+                codepoints[count++] = i;
+            int extras[] = {
+                0x03B1, 0x03B2, 0x03B3, 0x03B4, 0x03B8, 0x03C0, // α β γ δ θ π
+                0x03C9, 0x2190, 0x2191, 0x2192, 0x2193,         // ω ← ↑ → ↓
+                0x221A, 0x2248, 0x2260, 0x2264, 0x2265};        // √ ≈ ≠ ≤ ≥
+            for (int e : extras)
+                codepoints[count++] = e;
+
+            m_font = LoadFontEx(path.c_str(), base_size, codepoints, count);
             SetTextureFilter(m_font.texture, TEXTURE_FILTER_BILINEAR);
             m_has_custom_font = true;
         } else {
-            // apply bilinear filtering to default font for slightly better
-            // quality
             Font def = GetFontDefault();
             SetTextureFilter(def.texture, TEXTURE_FILTER_BILINEAR);
             m_has_custom_font = false;
@@ -405,6 +376,8 @@ class RaylibRenderer : public Renderer {
 
             float advance = (info.advanceX == 0) ? src.width * scale
                                                  : (float)info.advanceX * scale;
+            // kern pair adjustment
+
             cursor += advance;
 
             i += bytes;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <manifold/renderer/annotation_visuals.h>
 #include <manifold/renderer/demo_base.h>
 #include <manifold/solver/constraints/fixed_rotation_constraint.h>
 #include <manifold/solver/constraints/line_constraint.h>
@@ -24,9 +25,9 @@ class SpringDemo : public DemoBase {
     static constexpr int SimSteps = 100;
 
     const char *name() const override { return "Spring"; }
-    double default_cam_x() const override { return 0.0; }
+    double default_cam_x() const override { return 0.5; }
     double default_cam_y() const override { return 0.0; }
-    double default_cam_zoom() const override { return 80.0; }
+    double default_cam_zoom() const override { return 70.0; }
 
     void initialize() override {
         m_system.reset();
@@ -68,7 +69,6 @@ class SpringDemo : public DemoBase {
         m_plot_vel.configure("Velocity (m/s)", Rendering::palette::accent3());
         m_plot_energy.configure("Total Energy (J)",
                                 Rendering::palette::accent1());
-
         m_plot_pos.clear();
         m_plot_vel.clear();
         m_plot_energy.clear();
@@ -89,14 +89,80 @@ class SpringDemo : public DemoBase {
     void render(Rendering::Renderer *r) override {
         draw_grid(r);
 
-        r->draw_line(-10, 0, 10, 0, 2.0f, Rendering::palette::grid_axis());
-        r->draw_circle(0, 0, 0.05, Rendering::palette::text_dim());
+        auto dim = Rendering::palette::text_dim();
+        auto ann = Rendering::Color::rgba(100, 160, 200, 180);
+        auto disp_col = Rendering::palette::accent3();
+        auto vel_col = Rendering::palette::accent2();
+        auto force_col = Rendering::palette::accent1();
 
-        draw_spring_visual(r, 0, 0, m_body.p.x(), 0, 10, 0.25);
+        // ---- annotations (behind the scene) ----
 
-        r->draw_bar(m_body.p.x(), m_body.p.y(), 0, BoxSize, BoxSize,
-                    Rendering::palette::accent2(),
+        // equilibrium reference: dashed vertical at x=0
+        Rendering::draw_dashed_line(r, 0, -2, 0, 2, 1.0f, dim, 0.12, 0.08);
+        Rendering::draw_reference_cross(r, 0, 0, 0.08, 1.5f, dim);
+
+        // equilibrium label
+        int sx_eq, sy_eq;
+        r->world_to_screen(0, 1.8, &sx_eq, &sy_eq);
+        r->draw_text("x = 0", sx_eq - 14, sy_eq - 8, 12, dim);
+
+        // displacement arrow from equilibrium to mass center
+        double x = m_body.p.x();
+        if (std::abs(x) > 0.05) {
+            Rendering::draw_displacement(r, 0, 0, x, 0, "x = %.3f m", x, 2.0f,
+                                         disp_col, -0.5);
+        }
+
+        // velocity arrow on the mass
+        double vx = m_body.v.x();
+        if (std::abs(vx) > 0.05) {
+            Rendering::draw_velocity_arrow(r, x, BoxSize * 0.5 + 0.15, vx, 0,
+                                           0.08, 2.0f, vel_col);
+            // label
+            int sx_v, sy_v;
+            r->world_to_screen(x + vx * 0.04, BoxSize * 0.5 + 0.35, &sx_v,
+                               &sy_v);
+            char vbuf[32];
+            std::snprintf(vbuf, sizeof(vbuf), "v = %.2f", vx);
+            r->draw_text(vbuf, sx_v - 20, sy_v - 8, 12, vel_col);
+        }
+
+        // spring force arrow on the mass
+        double spring_force = -SpringK * x; // F = -kx
+        if (std::abs(spring_force) > 0.5) {
+            Rendering::draw_force_arrow(r, x, -(BoxSize * 0.5 + 0.15),
+                                        spring_force, 0, 0.003, 2.5f,
+                                        force_col);
+            int sx_f, sy_f;
+            r->world_to_screen(x + spring_force * 0.0015,
+                               -(BoxSize * 0.5 + 0.35), &sx_f, &sy_f);
+            char fbuf[32];
+            std::snprintf(fbuf, sizeof(fbuf), "F = %.1f N", spring_force);
+            r->draw_text(fbuf, sx_f - 24, sy_f - 8, 12, force_col);
+        }
+
+        // ---- scene ----
+
+        // rail
+        r->draw_line(-6, 0, 6, 0, 1.5f, dim);
+
+        // wall at anchor
+        r->draw_line(-0.05, -0.6, -0.05, 0.6, 2.5f,
+                     Rendering::palette::foreground());
+        for (int i = -3; i <= 3; ++i) {
+            double hy = i * 0.15;
+            r->draw_line(-0.05, hy, -0.25, hy - 0.12, 1.5f, dim);
+        }
+
+        // spring coil
+        draw_spring_visual(r, 0, 0, x, 0, 10, 0.2);
+
+        // mass block
+        r->draw_bar(x, 0, 0, BoxSize, BoxSize, Rendering::palette::accent2(),
                     Rendering::palette::shadow());
+
+        // center dot on mass
+        r->draw_circle(x, 0, 0.03, Rendering::palette::background());
 
         render_hud(r);
 
