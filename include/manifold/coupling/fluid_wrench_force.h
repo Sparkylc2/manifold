@@ -19,7 +19,6 @@ class FluidWrenchForce : public Solver::ForceGenerator {
         const int i = m_body->index;
         if (i < 0)
             return;
-        state->f[i] += m_force;
         state->apply_force(m_force, i);
         state->apply_torque(m_torque, i);
     }
