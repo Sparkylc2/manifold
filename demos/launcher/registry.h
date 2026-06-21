@@ -6,7 +6,10 @@
 #include "../crank_slider.h"
 #include "../double_pendulum_demo.h"
 #include "../engine_demo.h"
+#include "../fluid_demo.h"
+#include "../flutter_demo.h"
 #include "../graphics_test_demo.h"
+#include "../karman_demo.h"
 #include "../jansen_demo.h"
 #include "../nbody_demo.h"
 #include "../pendulum_demo.h"
@@ -55,6 +58,18 @@ inline void populate_registry(DemoRegistry &registry) {
     registry.add<Demo::EngineDemo>(
         "engine", "Engine", "Mechanisms",
         "Vertical crank-slider with flywheel, spring return, annotations");
+
+    registry.add<Demo::FluidDemo>(
+        "fluid", "Stable Fluids", "Fluids",
+        "Stam stable-fluid solver; left-drag to add velocity and dye");
+
+    registry.add<Demo::KarmanDemo>(
+        "karman", "Karman Vortex", "Fluids",
+        "Flow past a cylinder (volume penalization); speed map + force readout");
+
+    registry.add<Demo::FlutterDemo>(
+        "flutter", "Cylinder Flutter", "Fluids",
+        "Two-way coupled cylinder on springs in a flow; drag it or add dye");
 }
 
 } // namespace manifold::App
