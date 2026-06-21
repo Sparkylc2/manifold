@@ -14,7 +14,7 @@ namespace manifold::App {
 
 class Browser {
   public:
-    // returns the ID of the clicked demo, or empty string if none
+    // returns the ID of the clicked demo
     std::string update_and_render(const DemoRegistry &registry,
                                   Rendering::Renderer *r) {
         std::string launched;
@@ -37,7 +37,7 @@ class Browser {
         int tab_x = m_margin;
 
         for (int i = 0; i < (int)cats.size(); ++i) {
-            int tw = MeasureText(cats[i].c_str(), 16) + 24;
+            int tw = r->measure_text(cats[i], 16) + 24;
             Rectangle tab_rect = {(float)tab_x, (float)tab_y, (float)tw, 28};
 
             bool selected = (i == m_active_tab);
@@ -149,7 +149,7 @@ class Browser {
         }
 
         // category tag
-        int tag_w = MeasureText(entry->category.c_str(), 12) + 12;
+        int tag_w = r->measure_text(entry->category, 12) + 12;
         DrawRectangle(x + w - tag_w - 8, y + 8, tag_w, 18,
                       to_rl(theme.accent2));
         r->draw_text(entry->category.c_str(), x + w - tag_w - 2, y + 11, 12,
@@ -158,9 +158,11 @@ class Browser {
         // name
         r->draw_text(entry->name.c_str(), x + 12, y + 14, 20, theme.foreground);
 
-        // description
-        r->draw_text(entry->description.c_str(), x + 12, y + 42, 14,
-                     theme.text_dim);
+        // description — wrapped to the card, ellipsised past two lines
+        auto lines = wrap_text(r, entry->description, 14, w - 24, 2);
+        for (int li = 0; li < (int)lines.size(); ++li)
+            r->draw_text(lines[li], x + 12, y + 40 + li * 16, 14,
+                         theme.text_dim);
 
         // launch hint on hover
         if (hovered) {
@@ -171,6 +173,43 @@ class Browser {
         return clicked ? entry->id : "";
     }
 
+    // greedy word-wrap to max_w px, capped at max_lines (overflow ellipsised)
+    std::vector<std::string> wrap_text(Rendering::Renderer *r,
+                                       const std::string &text, int font_size,
+                                       int max_w, int max_lines) {
+        std::vector<std::string> lines;
+        std::string cur;
+        size_t i = 0;
+        while (i < text.size()) {
+            size_t sp = text.find(' ', i);
+            std::string word =
+                text.substr(i, sp == std::string::npos ? sp : sp - i);
+            i = (sp == std::string::npos) ? text.size() : sp + 1;
+
+            std::string trial = cur.empty() ? word : cur + " " + word;
+            if (cur.empty() || r->measure_text(trial, font_size) <= max_w)
+                cur = trial;
+            else {
+                lines.push_back(cur);
+                cur = word;
+            }
+        }
+        if (!cur.empty())
+            lines.push_back(cur);
+
+        if ((int)lines.size() > max_lines) {
+            lines.resize(max_lines);
+            std::string &last = lines.back();
+            while (!last.empty() &&
+                   r->measure_text(last + "...", font_size) > max_w)
+                last.pop_back();
+            while (!last.empty() && last.back() == ' ')
+                last.pop_back();
+            last += "...";
+        }
+        return lines;
+    }
+
     static ::Color to_rl(Rendering::Color c) { return {c.r, c.g, c.b, c.a}; }
 
     int m_active_tab = 0;
@@ -179,7 +218,7 @@ class Browser {
     static constexpr int m_header_h = 52;
     static constexpr int m_margin = 20;
     static constexpr int m_card_w = 280;
-    static constexpr int m_card_h = 80;
+    static constexpr int m_card_h = 96;
     static constexpr int m_card_gap = 12;
 };
 

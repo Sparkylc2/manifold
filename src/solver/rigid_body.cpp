@@ -21,7 +21,7 @@ double RigidBody::energy() const {
     return E_k + E_r;
 }
 
-void RigidBody::local_to_world(const Vector2d &l, Vector2d *w) {
+void RigidBody::local_to_world(const Vector2d &l, Vector2d *w) const {
     if (!w) {
         assert(w != nullptr && "passing in a null output vector");
         return;
@@ -32,7 +32,7 @@ void RigidBody::local_to_world(const Vector2d &l, Vector2d *w) {
     //
 }
 
-void RigidBody::world_to_local(const Vector2d &w, Vector2d *l) {
+void RigidBody::world_to_local(const Vector2d &w, Vector2d *l) const {
     if (!l) {
         assert(l != nullptr && "passing in a null output vector");
         return;

@@ -14,7 +14,7 @@ class HUDPanel {
           m_line_height(line_height) {}
 
     void title(const char *text, Color color) {
-        m_r->draw_text(text, m_x, m_y, m_font_size + 2, color);
+        emit(text, m_font_size + 2, color);
         m_y += m_line_height + 6;
     }
 
@@ -25,17 +25,17 @@ class HUDPanel {
         std::vsnprintf(buf, sizeof(buf), fmt, args);
         va_end(args);
 
-        m_r->draw_text(buf, m_x, m_y, m_font_size, color);
+        emit(buf, m_font_size, color);
         m_y += m_line_height;
     }
 
     void text(const char *str, Color color) {
-        m_r->draw_text(str, m_x, m_y, m_font_size, color);
+        emit(str, m_font_size, color);
         m_y += m_line_height;
     }
 
     void small_text(const char *str, Color color) {
-        m_r->draw_text(str, m_x, m_y, m_font_size - 4, color);
+        emit(str, m_font_size - 4, color);
         m_y += m_line_height;
     }
 
@@ -46,6 +46,12 @@ class HUDPanel {
     void set_font_size(int size) { m_font_size = size; }
 
   private:
+    // chrome always sits above world content/text
+    void emit(const char *str, int size, Color color) {
+        LayerScope ui(m_r, Layer::UI);
+        m_r->draw_text(str, m_x, m_y, size, color);
+    }
+
     Renderer *m_r;
     int m_x, m_y;
     int m_font_size;

@@ -193,9 +193,9 @@ class CrankSliderDemo : public DemoBase {
         // ---- annotations ----
 
         // motor angle arc
-        Rendering::draw_angle_marker(r, 0, 0, 0, m_motor.theta,
-                                     MotorRadius * 0.5, 1.5f, accent1, dim,
-                                     true, MotorRadius * 0.7);
+        Rendering::draw_angle_marker(
+            r, 0, 0, 0, m_motor.theta, MotorRadius * 0.5, 1.5f, accent1, dim,
+            {.show_label = true, .ref_line_len = MotorRadius * 0.7});
 
         // slider displacement from rest position
         double rest_x = MotorRadius + ArmLength + SpringRestLen;

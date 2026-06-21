@@ -10,8 +10,8 @@ struct RigidBody {
     RigidBody();
     ~RigidBody();
 
-    void local_to_world(const Vector2d &l, Vector2d *w);
-    void world_to_local(const Vector2d &w, Vector2d *l);
+    void local_to_world(const Vector2d &l, Vector2d *w) const;
+    void world_to_local(const Vector2d &w, Vector2d *l) const;
 
     Vector2d p = {0.0, 0.0};
     Vector2d v = {0.0, 0.0};

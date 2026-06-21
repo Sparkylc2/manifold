@@ -2,8 +2,8 @@
 
 #include "manifold/solver/forces/uniform_gravity.h"
 #include <manifold/control/pid.h>
+#include <manifold/renderer/constraint_visuals.h>
 #include <manifold/renderer/demo_base.h>
-#include <manifold/renderer/joint_visuals.h>
 #include <manifold/solver/constraints/fixed_rotation_constraint.h>
 #include <manifold/solver/constraints/line_constraint.h>
 #include <manifold/solver/constraints/link_constraint.h>

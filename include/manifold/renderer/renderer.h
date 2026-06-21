@@ -14,6 +14,7 @@ constexpr int S = 83, T = 84, U = 85, V = 86, W = 87, X = 88;
 constexpr int Y = 89, Z = 90;
 constexpr int Up = 265, Down = 264, Left = 263, Right = 262;
 constexpr int Escape = 256;
+constexpr int LeftShift = 340, RightShift = 344;
 } // namespace keys
 
 namespace mouse {
@@ -22,11 +23,17 @@ constexpr int Right = 1;
 constexpr int Middle = 2;
 } // namespace mouse
 
+// draw layers, flushed bottom-to-top by a recording renderer. Auto is the
+// default: primitives route implicitly (text -> Text, grid -> Grid, body
+// shadows -> Shadow, rest -> Content). Setting any real layer pins every
+// subsequent draw to it, overriding the implicit routing.
+enum class Layer { Grid, Shadow, Content, Text, UI, Count, Auto };
+
 struct RendererConfig {
     int width = 1280;
     int height = 720;
     std::string title = "manifold";
-    int target_fps = 60;
+    int target_fps = 240;
     bool vsync = true;
     bool msaa = true;
     bool highdpi = true;
@@ -55,8 +62,8 @@ class Renderer {
                            double thickness, Color color) = 0;
     virtual void draw_circle(double x, double y, double radius,
                              Color color) = 0;
-    virtual void draw_rect(double x, double y, double w, double h,
-                           Color color) = 0;
+    virtual void draw_rect(double x, double y, double w, double h, Color color,
+                           double theta = 0.0) = 0;
     virtual void draw_arrow(double x0, double y0, double x1, double y1,
                             double thickness, Color color) = 0;
     virtual void draw_grid(double spacing, double extent, Color line_color,
@@ -71,6 +78,9 @@ class Renderer {
     // screen-space drawing
     virtual void draw_text(const std::string &text, int screen_x, int screen_y,
                            int font_size, Color color) = 0;
+    virtual void draw_text_rotated(const std::string &text, int sx, int sy,
+                                   int font_size, double angle_rad,
+                                   Color color) = 0;
     virtual void draw_screen_line(int x0, int y0, int x1, int y1,
                                   float thickness, Color color) = 0;
     virtual void draw_smooth_screen_line(int x0, int y0, int x1, int y1,
@@ -78,6 +88,9 @@ class Renderer {
         draw_screen_line(x0, y0, x1, y1, thickness, color);
     }
     virtual void draw_screen_rect(int x, int y, int w, int h, Color color) = 0;
+
+    // rendered width of text in the active font, in pixels
+    virtual int measure_text(const std::string &text, int font_size) = 0;
 
     // camera
     virtual void set_camera(double x, double y, double zoom) = 0;
@@ -99,6 +112,20 @@ class Renderer {
     virtual int screen_width() const = 0;
     virtual int screen_height() const = 0;
     virtual float delta_time() const = 0;
+
+    // layer routing — no-op for immediate renderers, honored by recording ones
+    virtual void set_layer(Layer) {}
+    virtual Layer current_layer() const { return Layer::Content; }
+};
+
+// scoped layer switch, restores the previous layer on exit
+struct LayerScope {
+    Renderer *r;
+    Layer prev;
+    LayerScope(Renderer *r, Layer l) : r(r), prev(r->current_layer()) {
+        r->set_layer(l);
+    }
+    ~LayerScope() { r->set_layer(prev); }
 };
 
 } // namespace manifold::Rendering

@@ -3,6 +3,7 @@
 
 #include <manifold/app/browser.h>
 #include <manifold/app/theme_sync.h>
+#include <manifold/renderer/layered_renderer.h>
 #include <manifold/renderer/raylib_renderer.h>
 
 #include <cstdio>
@@ -59,11 +60,13 @@ int main(int argc, char *argv[]) {
     config.width = 1280;
     config.height = 720;
     config.title = "manifold";
-    config.target_fps = 60;
+    config.target_fps = 240;
     config.msaa = true;
     config.highdpi = true;
     config.smooth_lines = true;
     config.font_path = "assets/fonts/Inter-Medium.ttf";
+
+    manifold::Rendering::set_theme(manifold::Rendering::Theme::earth());
 
     if (!renderer.init(config))
         return 1;
@@ -74,7 +77,19 @@ int main(int argc, char *argv[]) {
     // ---- state ----
     AppState state = direct_launch ? AppState::Running : AppState::Browser;
     manifold::App::Browser browser;
+    manifold::Rendering::LayeredRenderer layered(&renderer);
     std::unique_ptr<manifold::Demo::DemoBase> active_demo;
+
+    // [F] toggles an FPS readout in the top-right corner
+    bool show_fps = false;
+    auto draw_fps = [&](manifold::Rendering::Renderer *r) {
+        if (!show_fps)
+            return;
+        char buf[16];
+        std::snprintf(buf, sizeof(buf), "%d FPS", GetFPS());
+        r->draw_text(buf, r->screen_width() - 80, 8, 14,
+                     manifold::Rendering::palette::text_dim());
+    };
 
     // direct launch: create the demo immediately
     if (direct_launch) {
@@ -88,6 +103,9 @@ int main(int argc, char *argv[]) {
     bool running = true;
     while (!renderer.should_close() && running) {
         double dt = std::min((double)renderer.delta_time(), 1.0 / 30.0);
+
+        if (IsKeyPressed(KEY_F))
+            show_fps = !show_fps;
 
         switch (state) {
         case AppState::Browser: {
@@ -116,6 +134,8 @@ int main(int argc, char *argv[]) {
                 }
             }
 
+            draw_fps(&renderer);
+
             EndDrawing();
             break;
         }
@@ -128,18 +148,23 @@ int main(int argc, char *argv[]) {
                 break;
             }
 
-            active_demo->handle_input(&renderer);
+            active_demo->handle_input(&layered);
             active_demo->process(dt);
 
-            renderer.begin_frame();
-            active_demo->render_frame(&renderer);
+            layered.begin_frame();
+            active_demo->render_frame(&layered);
 
-            // bottom bar — ESC hint
-            auto dim = manifold::Rendering::palette::text_dim();
-            renderer.draw_text("[ESC] Back to browser", 12,
-                               renderer.screen_height() - 24, 14, dim);
+            // bottom bar — ESC hint (UI layer: above world text)
+            {
+                auto dim = manifold::Rendering::palette::text_dim();
+                manifold::Rendering::LayerScope ui(
+                    &layered, manifold::Rendering::Layer::UI);
+                layered.draw_text("[ESC] Back to browser", 12,
+                                  layered.screen_height() - 24, 14, dim);
+                draw_fps(&layered);
+            }
 
-            renderer.end_frame();
+            layered.end_frame();
             break;
         }
         }

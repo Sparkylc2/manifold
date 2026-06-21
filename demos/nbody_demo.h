@@ -15,7 +15,7 @@ using Vector2d = Eigen::Vector2d;
 
 class NBodyDemo : public DemoBase {
   public:
-    static constexpr int Num_Particles = 100;
+    static constexpr int Num_Particles = 500;
     static constexpr double Min_Mass = 1.0;
     static constexpr double Max_Mass = 5.0;
     static constexpr double Density = 100.0;

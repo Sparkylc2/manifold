@@ -9,12 +9,22 @@ bool ConjugateGradientSLESolver::solve(SparseMatrix<double> &J, VectorXd &W,
                                        VectorXd &right, VectorXd *result,
                                        VectorXd *previous) {
     const int n = right.size();
+    const int n_dof = (int)J.cols();
 
-    m_r.resize(n);
-    m_p.resize(n);
-    m_Ap.resize(n);
-    m_x.setZero(n);
+    if (n != m_last_n || n_dof != m_last_n_dof) {
+        m_r.resize(n);
+        m_p.resize(n);
+        m_Ap.resize(n);
+        m_x.resize(n);
+        m_mreg0.resize(n_dof);
+        m_mreg1.resize(n_dof);
+        m_last_n = n;
+        m_last_n_dof = n_dof;
+    }
 
+    m_J_T = J.transpose();
+
+    m_x.setZero();
     if (previous != nullptr && previous->size() == n) {
         m_x = *previous;
     }
@@ -50,7 +60,9 @@ bool ConjugateGradientSLESolver::solve(SparseMatrix<double> &J, VectorXd &W,
         const double rk1_mag = m_r.squaredNorm();
         const double beta = rk1_mag / rk_mag;
 
-        m_p = m_r + beta * m_p;
+        // avoids temp from `m_p = m_r + beta * m_p`
+        m_p *= beta;
+        m_p += m_r;
     }
 
     return false;
@@ -58,8 +70,8 @@ bool ConjugateGradientSLESolver::solve(SparseMatrix<double> &J, VectorXd &W,
 
 void ConjugateGradientSLESolver::multiply(SparseMatrix<double> &J, VectorXd &W,
                                           VectorXd &x, VectorXd *target) {
-    // A*x = J * diag(W) * J^T * x  (without forming A)
-    m_mreg0.noalias() = J.transpose() * x;
+    // A*x = J * diag(W) * J^T * x
+    m_mreg0.noalias() = m_J_T * x;
     m_mreg1 = W.cwiseProduct(m_mreg0);
     target->noalias() = J * m_mreg1;
 }

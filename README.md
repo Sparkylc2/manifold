@@ -6,7 +6,7 @@ A modular physics simulation and rendering framework in C++20, built for myself 
 
 The goal was to get a foundation upon which I can rapidly iterate and work on a number of projects. Each module (the solver, renderer, etc.), are meant to be self-contained libraries that can be composed into demos. 
 
-The solver architecture is **HEAVILY** (to a point where most of the structure is nearly identical) inspired by [Ange the Great's](https://github.com/ange-yaghi) constraint solver, reimplemented with Eigen for linear algebra and raylib for  rendering.
+The solver architecture is **HEAVILY** (to a point where most of the structure is nearly identical, and I mean bar for bar) inspired by [Ange the Great's](https://github.com/ange-yaghi) constraint solver, reimplemented with Eigen for linear algebra and raylib for rendering.
 
 **Current capabilities:**
 - 2D constraint-based rigid body solver (uses conjugate gradient)

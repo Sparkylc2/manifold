@@ -25,7 +25,18 @@ class ConjugateGradientSLESolver : public SLESolver {
                   VectorXd *target);
     bool sufficiently_small(const VectorXd &x, const VectorXd &target) const;
 
-    VectorXd m_r, m_p, m_Ap, m_x, m_mreg0, m_mreg1;
+    // CG working vectors
+    VectorXd m_r, m_p, m_Ap, m_x;
+
+    // multiply scratch (sized to DOF count, not constraint count)
+    VectorXd m_mreg0, m_mreg1;
+
+    // cached explicit transpose of J (avoids view overhead per CG iteration)
+    SparseMatrix<double> m_J_T;
+
+    // pre-allocation tracking — only resize when dimensions change
+    int m_last_n = -1;
+    int m_last_n_dof = -1;
 
     int m_max_iter;
     double m_max_err;

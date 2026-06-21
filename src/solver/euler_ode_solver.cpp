@@ -3,6 +3,8 @@
 
 namespace manifold::Solver {
 
+EulerODESolver::EulerODESolver() {}
+
 void EulerODESolver::start(SystemState *initial, double dt) {
     ODESolver::start(initial, dt);
 }

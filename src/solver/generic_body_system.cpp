@@ -10,6 +10,14 @@ void GenericRigidBodySystem::initialize(SLESolver *sle_solver,
     m_sle_solver = sle_solver;
     m_ode_solver = ode_solver;
     m_iv.lambda.resize(0);
+    m_pattern_valid = false;
+}
+
+void GenericRigidBodySystem::reset() {
+    RigidBodySystem::reset();
+    m_pattern_valid = false;
+    m_cached_n = 0;
+    m_cached_m_f = 0;
 }
 
 void GenericRigidBodySystem::process(double dt, int steps) {
@@ -17,15 +25,22 @@ void GenericRigidBodySystem::process(double dt, int steps) {
     long long ode_time = 0, constraint_time = 0, force_time = 0, eval_time = 0;
 #endif
 
+    if (m_is_paused) {
+        return;
+    }
+
     populate_state();
 
     // build M_inv once per frame
     const int n = get_body_count();
     m_iv.M_inv.resize(3 * n);
+
     for (int i = 0; i < n; ++i) {
-        m_iv.M_inv[3 * i + 0] = 1.0 / m_bodies[i]->m;
-        m_iv.M_inv[3 * i + 1] = 1.0 / m_bodies[i]->m;
-        m_iv.M_inv[3 * i + 2] = 1.0 / m_bodies[i]->I;
+        double inv_m = (m_bodies[i]->m > 0) ? 1.0 / m_bodies[i]->m : 0.0;
+        double inv_I = (m_bodies[i]->I > 0) ? 1.0 / m_bodies[i]->I : 0.0;
+        m_iv.M_inv[3 * i + 0] = inv_m;
+        m_iv.M_inv[3 * i + 1] = inv_m;
+        m_iv.M_inv[3 * i + 2] = inv_I;
     }
 
     for (int i = 0; i < steps; ++i) {
@@ -119,14 +134,24 @@ void GenericRigidBodySystem::process_constraints(long long *eval_time,
         m_iv.F_ext[3 * i + 2] = m_state.t[i];
     }
 
-    // assemble sparse Jacobian via triplets
     m_iv.C.resize(m_f);
     m_iv.ks.resize(m_f);
     m_iv.kd.resize(m_f);
 
+    const bool topology_changed = (n != m_cached_n || m_f != m_cached_m_f);
+    const bool rebuild_pattern = !m_pattern_valid || topology_changed;
+
     std::vector<Triplet<double>> J_triplets, J_dot_triplets;
-    J_triplets.reserve(m_f * 6);
-    J_dot_triplets.reserve(m_f * 6);
+    if (rebuild_pattern) {
+        J_triplets.reserve(m_f * 6);
+        J_dot_triplets.reserve(m_f * 6);
+    } else {
+        // zero values but keep compressed structure
+        std::fill(m_iv.J.valuePtr(), m_iv.J.valuePtr() + m_iv.J.nonZeros(),
+                  0.0);
+        std::fill(m_iv.J_dot.valuePtr(),
+                  m_iv.J_dot.valuePtr() + m_iv.J_dot.nonZeros(), 0.0);
+    }
 
     Constraint::Output output;
     for (int j = 0, j_f = 0; j < m; ++j) {
@@ -146,20 +171,32 @@ void GenericRigidBodySystem::process_constraints(long long *eval_time,
                 for (int d = 0; d < 3; ++d) {
                     double jval = output.J[k][3 * bi + d];
                     double jdval = output.J_dot[k][3 * bi + d];
-                    if (jval != 0.0)
+
+                    if (rebuild_pattern) {
+                        // always insert (even zeros) so the pattern is stable
                         J_triplets.emplace_back(j_f, 3 * idx + d, jval);
-                    if (jdval != 0.0)
                         J_dot_triplets.emplace_back(j_f, 3 * idx + d, jdval);
+                    } else {
+                        m_iv.J.coeffRef(j_f, 3 * idx + d) = jval;
+                        m_iv.J_dot.coeffRef(j_f, 3 * idx + d) = jdval;
+                    }
                 }
             }
         }
     }
 
-    m_iv.J.resize(m_f, 3 * n);
-    m_iv.J.setFromTriplets(J_triplets.begin(), J_triplets.end());
+    if (rebuild_pattern) {
+        m_iv.J.resize(m_f, 3 * n);
+        m_iv.J.setFromTriplets(J_triplets.begin(), J_triplets.end());
 
-    m_iv.J_dot.resize(m_f, 3 * n);
-    m_iv.J_dot.setFromTriplets(J_dot_triplets.begin(), J_dot_triplets.end());
+        m_iv.J_dot.resize(m_f, 3 * n);
+        m_iv.J_dot.setFromTriplets(J_dot_triplets.begin(),
+                                   J_dot_triplets.end());
+
+        m_pattern_valid = true;
+        m_cached_n = n;
+        m_cached_m_f = m_f;
+    }
 
     // RHS = -(J_dot * q_dot + J * M_inv * F_ext + ks.*C + kd.*(J * q_dot))
     VectorXd Jq = m_iv.J * m_iv.q_dot;
@@ -180,7 +217,7 @@ void GenericRigidBodySystem::process_constraints(long long *eval_time,
     auto s2 = std::chrono::steady_clock::now();
 #endif
 
-    // compute accelerations: a = M_inv * (F_ext + J^T * lambda)
+    //  a = M_inv * (F_ext + J^T * lambda)
     VectorXd F_total = m_iv.F_ext + m_iv.J.transpose() * m_iv.lambda;
     VectorXd accel = m_iv.M_inv.cwiseProduct(F_total);
 
@@ -189,18 +226,20 @@ void GenericRigidBodySystem::process_constraints(long long *eval_time,
         m_state.a_theta[i] = accel[3 * i + 2];
     }
 
-    // store per-constraint reaction forces for visualization
     for (int j = 0, j_f = 0; j < m; ++j) {
-        m_constraints[j]->calculate(&output, &m_state);
         const int n_f = m_constraints[j]->constraint_count();
 
         for (int k = 0; k < n_f; ++k, ++j_f) {
             double lam = m_iv.lambda[j_f];
             for (int bi = 0; bi < m_constraints[j]->m_body_count; ++bi) {
+                const int idx = m_constraints[j]->m_bodies[bi]->index;
+                if (idx == -1)
+                    continue;
                 m_state.r[j_f * 2 + bi] =
-                    Vector2d(output.J[k][3 * bi + 0] * lam,
-                             output.J[k][3 * bi + 1] * lam);
-                m_state.r_t[j_f * 2 + bi] = output.J[k][3 * bi + 2] * lam;
+                    Vector2d(m_iv.J.coeff(j_f, 3 * idx + 0) * lam,
+                             m_iv.J.coeff(j_f, 3 * idx + 1) * lam);
+                m_state.r_t[j_f * 2 + bi] =
+                    m_iv.J.coeff(j_f, 3 * idx + 2) * lam;
             }
         }
     }

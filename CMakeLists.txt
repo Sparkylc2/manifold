@@ -7,6 +7,10 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
 # dependencies
 include(cmake/FetchDependencies.cmake)
 
@@ -36,4 +40,8 @@ target_link_libraries(manifold_renderer INTERFACE raylib)
 
 # ---- demos & tests ----
 add_subdirectory(demos)
+
+# ---- profiling ----
+add_subdirectory(src/profiling)
+
 # add_subdirectory(tests)

@@ -105,7 +105,7 @@ class RaylibRenderer : public Renderer {
         }
     }
 
-    // === world-space ===
+    // --- world-space ---
 
     void draw_bar(double x, double y, double theta, double length, double width,
                   Color fill, Color shadow_color) override {
@@ -145,13 +145,13 @@ class RaylibRenderer : public Renderer {
                     detail::to_rl(color));
     }
 
-    void draw_rect(double x, double y, double w, double h,
-                   Color color) override {
-        float sx = w2sx(x - w / 2);
-        float sy = w2sy(y + h / 2);
-        float sw = (float)(w * m_zoom);
-        float sh = (float)(h * m_zoom);
-        DrawRectangleV({sx, sy}, {sw, sh}, detail::to_rl(color));
+    void draw_rect(double x, double y, double w, double h, Color color,
+                   double theta = 0.0) override {
+        float sx = w2sx(x), sy = w2sy(y);
+        float sw = (float)(w * m_zoom), sh = (float)(h * m_zoom);
+        float deg = (float)(-theta * 180.0 / M_PI);
+        DrawRectanglePro({sx, sy, sw, sh}, {sw / 2.0f, sh / 2.0f}, deg,
+                         detail::to_rl(color));
     }
 
     void draw_arrow(double x0, double y0, double x1, double y1,
@@ -161,10 +161,10 @@ class RaylibRenderer : public Renderer {
                    detail::to_rl(color));
         float dx = sx1 - sx0, dy = sy1 - sy0;
         float len = std::sqrt(dx * dx + dy * dy);
-        if (len < 1.0f)
+        if (len < 1e-3f) // only bail on a zero-length (directionless) arrow
             return;
         float nx = dx / len, ny = dy / len;
-        float hl = std::min(12.0f, len * 0.3f), hw = hl * 0.5f;
+        const float hl = 12.0f, hw = hl * 0.5f; // constant head, independent of length
         DrawTriangle({sx1, sy1},
                      {sx1 - nx * hl + ny * hw, sy1 - ny * hl - nx * hw},
                      {sx1 - nx * hl - ny * hw, sy1 - ny * hl + nx * hw},
@@ -191,7 +191,7 @@ class RaylibRenderer : public Renderer {
         }
     }
 
-    // === screen-space ===
+    // --- screen-space ---
 
     void draw_text(const std::string &text, int sx, int sy, int font_size,
                    Color color) override {
@@ -200,6 +200,19 @@ class RaylibRenderer : public Renderer {
                                    (float)font_size, detail::to_rl(color));
         } else {
             DrawText(text.c_str(), sx, sy, font_size, detail::to_rl(color));
+        }
+    }
+    void draw_text_rotated(const std::string &text, int sx, int sy,
+                           int font_size, double angle_rad,
+                           Color color) override {
+        float deg = (float)(-angle_rad * 180.0 / M_PI);
+        if (m_has_custom_font) {
+            DrawTextPro(m_font, text.c_str(), {(float)sx, (float)sy}, {0, 0},
+                        deg, (float)font_size, 1.0f, detail::to_rl(color));
+        } else {
+            DrawTextPro(GetFontDefault(), text.c_str(), {(float)sx, (float)sy},
+                        {0, 0}, deg, (float)font_size, 1.0f,
+                        detail::to_rl(color));
         }
     }
 
@@ -219,7 +232,14 @@ class RaylibRenderer : public Renderer {
         DrawRectangle(x, y, w, h, detail::to_rl(color));
     }
 
-    // === camera ===
+    int measure_text(const std::string &text, int font_size) override {
+        if (m_has_custom_font)
+            return (int)measure_proportional(m_font, text.c_str(),
+                                             (float)font_size);
+        return MeasureText(text.c_str(), font_size);
+    }
+
+    // --- camera ---
 
     void set_camera(double x, double y, double zoom) override {
         m_cam_x = x;
@@ -239,7 +259,7 @@ class RaylibRenderer : public Renderer {
         *sy = (int)w2sy(wy);
     }
 
-    // === input ===
+    // --- input ---
 
     bool is_key_pressed(int key) override { return IsKeyPressed(key); }
     bool is_key_down(int key) override { return IsKeyDown(key); }
@@ -288,7 +308,6 @@ class RaylibRenderer : public Renderer {
     }
 
     // ---- anti-aliased line via vertex alpha quads ----
-
     void draw_aa_line(float x0, float y0, float x1, float y1, float thickness,
                       Color color) {
         float dx = x1 - x0, dy = y1 - y0;
@@ -297,7 +316,7 @@ class RaylibRenderer : public Renderer {
             return;
 
         float nx = -dy / len, ny = dx / len;
-        float half = thickness * 0.5f + 1.5f; // extra for AA margin
+        float half = thickness * 0.5f + 1.5f;
 
         unsigned char cr = color.r, cg = color.g, cb = color.b, ca = color.a;
 
@@ -311,7 +330,6 @@ class RaylibRenderer : public Renderer {
 
         rlColor4ub(cr, cg, cb, ca);
 
-        // UV.y: 0 at top edge, 0.5 at center, 1 at bottom edge
         rlTexCoord2f(0.0f, 0.0f);
         rlVertex2f(x0 + nx * half, y0 + ny * half);
         rlTexCoord2f(1.0f, 0.0f);
@@ -376,7 +394,6 @@ class RaylibRenderer : public Renderer {
 
             float advance = (info.advanceX == 0) ? src.width * scale
                                                  : (float)info.advanceX * scale;
-            // kern pair adjustment
 
             cursor += advance;
 
@@ -384,8 +401,23 @@ class RaylibRenderer : public Renderer {
         }
     }
 
-    // ---- FXAA setup ----
+    // matches draw_text_proportional's advance, so measured width == drawn width
+    float measure_proportional(::Font font, const char *text, float font_size) {
+        float scale = font_size / (float)font.baseSize;
+        float w = 0;
+        for (int i = 0; text[i] != '\0';) {
+            int bytes = 0;
+            int codepoint = GetCodepoint(&text[i], &bytes);
+            GlyphInfo info = GetGlyphInfo(font, codepoint);
+            Rectangle src = GetGlyphAtlasRec(font, codepoint);
+            w += (info.advanceX == 0) ? src.width * scale
+                                      : (float)info.advanceX * scale;
+            i += bytes;
+        }
+        return w;
+    }
 
+    // ---- FXAA setup ----
     void init_fxaa() {
         int sw = GetScreenWidth(), sh = GetScreenHeight();
         m_render_target = LoadRenderTexture(sw, sh);
@@ -404,7 +436,6 @@ class RaylibRenderer : public Renderer {
     }
 
     // ---- smooth line shader setup ----
-
     void init_smooth_line_shader() {
         if (FileExists("assets/shaders/smooth_line.fs")) {
             m_smooth_line_shader =
@@ -414,7 +445,6 @@ class RaylibRenderer : public Renderer {
     }
 
     // ---- state ----
-
     double m_cam_x, m_cam_y, m_zoom;
 
     // font
