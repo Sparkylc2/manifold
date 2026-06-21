@@ -33,10 +33,13 @@ target_link_libraries(manifold_solver PUBLIC Eigen3::Eigen)
 add_library(manifold_control INTERFACE)
 target_include_directories(manifold_control INTERFACE include)
 
-# ---- renderer (header-only, links raylib) ----
-add_library(manifold_renderer INTERFACE)
-target_include_directories(manifold_renderer INTERFACE include)
-target_link_libraries(manifold_renderer INTERFACE raylib)
+# ---- renderer (links raylib) ----
+add_library(manifold_renderer STATIC
+    src/renderer/raylib_renderer.cpp
+    src/renderer/layered_renderer.cpp
+)
+target_include_directories(manifold_renderer PUBLIC include)
+target_link_libraries(manifold_renderer PUBLIC raylib)
 
 # ---- demos & tests ----
 add_subdirectory(demos)
