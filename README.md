@@ -10,16 +10,15 @@ The solver architecture is **HEAVILY** (to a point where most of the structure i
 
 **Current capabilities:**
 - 2D constraint-based rigid body solver (uses conjugate gradient)
-- Constraint types: link (pin joint), line (prismatic), fixed position, fixed rotation
-- Force generators: gravity, direct force application
-- PID controller with anti-windup
-- raylib-based renderer with a heavily Ange-inspired visual style 
+- Constraint types: link (pin joint), line (prismatic), fixed position, fixed rotation, gear, motor, 
+- Force generators: gravity, direct force application, spring, damper, planetary gravity
+- PID control
 
 
 **Planned:**
-- More ODE/PDE solvers (RK4, spectral methods)
+- More ODE/PDE solvers (spectral methods)
 - 3D rigid body dynamics (potentially, if we exclude the pain that is collision detection)
-- Fluid simulation (SPH, Eulerian grid)
+- Fluid simulation (SPH, MAC, Eulerian grid)
 - CNN inference on flow fields
 - MPC / LQR controllers
 - Scene serialization
@@ -60,8 +59,9 @@ My goal with this project was to understand the way implementations look, and no
 ## References
 
 - [Ange the Great — Simple 2D Constraint Solver](https://github.com/ange-yaghi/simple-2d-constraint-solver)
-- Witkin & Baraff, *Physically Based Modeling* (SIGGRAPH course notes)
-- Catto, *Iterative Dynamics with Temporal Coherence* (GDC 2005)
+- [ Witkin & Baraff, *Physically Based Modeling* (SIGGRAPH course notes) ](https://graphics.stanford.edu/courses/cs448b-00-winter/papers/phys_model.pdf)
+- [ Catto, *Iterative Dynamics with Temporal Coherence* (GDC 2005) ](https://box2d.org/files/ErinCatto_IterativeDynamics_GDC2005.pdf)
+- [Stam, Stable Fluids (SIGGRAPH 1999)](https://pages.cs.wisc.edu/~chaol/data/cs777/stam-stable_fluids.pdf)
 
 ## License
 

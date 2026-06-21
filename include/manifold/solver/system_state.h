@@ -16,9 +16,12 @@ class SystemState {
     void resize(int body_count, int constraint_count);
     void clear();
 
-    void local_to_world(const Vector2d l, Vector2d *w, int body);
-    void velocity_at_point(const Vector2d l, Vector2d *v, int body);
-    void apply_force(const Vector2d l, const Vector2d f, int body);
+    void local_to_world(const Vector2d &l, Vector2d *w, int body);
+    void velocity_at_point(const Vector2d &l, Vector2d *v, int body);
+    void apply_force(const Vector2d &l, const Vector2d &f, int body);
+
+    void apply_force(const Vector2d &f, int body);
+    void apply_torque(double torque, int body);
 
     std::vector<int> index_map;
 

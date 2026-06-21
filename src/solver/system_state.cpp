@@ -72,7 +72,7 @@ void SystemState::clear() {
     num_c = 0;
 }
 
-void SystemState::local_to_world(const Vector2d l, Vector2d *w, int body) {
+void SystemState::local_to_world(const Vector2d &l, Vector2d *w, int body) {
     const Vector2d p = this->p[body];
     const double theta = this->theta[body];
 
@@ -80,7 +80,7 @@ void SystemState::local_to_world(const Vector2d l, Vector2d *w, int body) {
     *w = rot * l + p;
 }
 
-void SystemState::velocity_at_point(const Vector2d l, Vector2d *v, int body) {
+void SystemState::velocity_at_point(const Vector2d &l, Vector2d *v, int body) {
     Vector2d w;
     local_to_world(l, &w, body);
 
@@ -91,7 +91,7 @@ void SystemState::velocity_at_point(const Vector2d l, Vector2d *v, int body) {
     *v = v[body] + angular_to_linear;
 }
 
-void SystemState::apply_force(const Vector2d l, const Vector2d f, int body) {
+void SystemState::apply_force(const Vector2d &l, const Vector2d &f, int body) {
 
     Vector2d w;
     local_to_world(l, &w, body);
@@ -101,4 +101,12 @@ void SystemState::apply_force(const Vector2d l, const Vector2d f, int body) {
     this->f[body] += f;
     this->t[body] += cross2d(r, f);
 }
+
+void SystemState::apply_force(const Vector2d &f, int body) {
+    this->f[body] += f;
+}
+void SystemState::apply_torque(double torque, int body) {
+    this->t[body] += torque;
+}
+
 } // namespace manifold::Solver

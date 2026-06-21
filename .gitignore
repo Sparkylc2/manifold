@@ -3,6 +3,9 @@ build/
 cmake-build-*/
 out/
 
+docs/
+CLAUDE.md
+
 # IDE
 .idea/
 .vscode/
