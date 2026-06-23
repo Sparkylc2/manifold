@@ -2,9 +2,11 @@
 
 #include <manifold/coupling/fluid_wrench_force.h>
 #include <manifold/coupling/rigid_body_boundary.h>
+#include <manifold/fluid/solid_shapes.h>
 #include <manifold/fluid/stable_fluid_solver.h>
 #include <manifold/renderer/constraint_visuals.h>
 #include <manifold/renderer/demo_base.h>
+#include <manifold/renderer/field_view.h>
 #include <manifold/solver/forces/mouse_spring.h>
 #include <manifold/solver/forces/spring.h>
 #include <manifold/solver/gaussian_elimination_sle_solver.h>
@@ -25,22 +27,21 @@ using Vector2d = Eigen::Vector2d;
 
 class FlutterDemo : public DemoBase {
   public:
-    static constexpr int COLS = 200;
-    static constexpr int ROWS = 100;
-    static constexpr double CELL = 0.09;
+    static constexpr int COLS = 330;
+    static constexpr int ROWS = 125;
+    static constexpr double CELL = 0.055;
     static constexpr int SS = 2;
 
     static constexpr double INFLOW = 3.0;
     static constexpr double VISC = 0.0;
     static constexpr double RADIUS = 0.3;
 
-    static constexpr double MASS = 3.0;
-    static constexpr double SPRING_K = 10.0;
+    static constexpr double MASS = 0.5;
+    static constexpr double SPRING_K = 7.5;
     static constexpr double SPRING_KD = 0;
     static constexpr double ANCHOR_L = 1.6;
-    static constexpr double FORCE_SCALE = 1.25;
+    static constexpr double FORCE_SCALE = 1;
     static constexpr int SUBSTEPS = 8;
-    static constexpr double TORQUE_GAIN = 3.0; // fluid -> disk spin coupling
 
     static constexpr double DENS_RATE = 120;
     static constexpr int BRUSH = 2;
@@ -97,78 +98,47 @@ class FlutterDemo : public DemoBase {
 
         m_fluid.add_boundary(&m_boundary);
 
-        Image img = GenImageColor(COLS * SS, ROWS * SS, BLACK);
-        m_tex = LoadTextureFromImage(img);
-        UnloadImage(img);
-        SetTextureFilter(m_tex, TEXTURE_FILTER_BILINEAR);
-        m_pixels.assign((size_t)COLS * SS * ROWS * SS, BLACK);
-    }
-
-    ~FlutterDemo() override {
-        if (m_tex.id != 0)
-            UnloadTexture(m_tex);
+        m_field.init(COLS, ROWS,
+                     {.supersample = SS,
+                      .edge_fade_px = FADE_PX,
+                      .gamma = 0.29,
+                      .colorbar = true},
+                     Rendering::speed_ramp());
+        m_field.set_scale(0.0, 2.0 * INFLOW, "speed");
     }
 
     void process(double dt) override {
         m_fluid.advance(dt);
+        // two-way load: net force + torque (torque now emerges from the
+        // per-cell no-slip penalization, not a separate rim model)
         const Vector2d F = m_fluid.obstacle_force() * FORCE_SCALE;
-        // const double tau = fluid_torque_on_cylinder();
-        m_fluid_force.set_wrench(F, 0.0);
+        const double tau = m_fluid.obstacle_torque(m_cyl.p) * FORCE_SCALE;
+        m_fluid_force.set_wrench(F, tau);
         m_system.process(dt, SUBSTEPS);
     }
 
-    double fluid_torque_on_cylinder() {
-        const int N = 32;
-        const double omega = m_cyl.v_theta;
-        double tau = 0.0;
-        for (int k = 0; k < N; ++k) {
-            const double phi = 2.0 * M_PI * k / N;
-            const Vector2d that(-std::sin(phi), std::cos(phi));
-            const Vector2d p =
-                m_cyl.p + RADIUS * Vector2d(std::cos(phi), std::sin(phi));
-            Vector2d vf;
-            m_fluid.velocity_at(p, &vf);
-            const double surf_tan = m_cyl.v.dot(that) + omega * RADIUS;
-            const double slip = vf.dot(that) - surf_tan;
-            tau += RADIUS * slip;
-        }
-        return TORQUE_GAIN * tau / N;
-    }
-    //
     void render(Rendering::Renderer *r) override {
         draw_world_grid(r);
 
         const Vector2d o = m_fluid.origin();
         const double vmax = 2.0 * INFLOW;
-        const int TW = COLS * SS, TH = ROWS * SS;
 
-        for (int ty = 0; ty < TH; ++ty) {
-            for (int tx = 0; tx < TW; ++tx) {
-                double wx = o.x() + ((tx + 0.5) / TW) * (COLS * CELL);
-                double wy = o.y() + (1.0 - (ty + 0.5) / TH) * (ROWS * CELL);
-                Vector2d w(wx, wy);
+        // colour = speed; alpha lights up where the flow deviates from the free
+        // stream (u=INFLOW, v=0), or where mouse dye is present
+        m_field.render(
+            r, o.x(), o.y(), CELL,
+            [this, vmax](double wx, double wy, double &val, double &a) {
                 Vector2d vel;
-                m_fluid.velocity_at(w, &vel);
-                double t = std::clamp(vel.norm() / vmax, 0.0, 1.0);
-                double pert = std::hypot(vel.x() - INFLOW, vel.y());
-                double a = std::clamp((pert - PERT_MIN) / (PERT_REF - PERT_MIN),
-                                      0.0, 1.0);
-                double dye = std::clamp(m_fluid.density_at(w), 0.0, 1.0);
-                Color c = speed_color(t);
-                double alpha = std::max(a, dye) * edge_fade(tx, ty, TW, TH);
-                c.a = (unsigned char)(alpha * 255);
-                m_pixels[(size_t)tx + (size_t)ty * TW] = c;
-            }
-        }
-        UpdateTexture(m_tex, m_pixels.data());
-
-        int tlx, tly, brx, bry;
-        r->world_to_screen(o.x(), o.y() + ROWS * CELL, &tlx, &tly);
-        r->world_to_screen(o.x() + COLS * CELL, o.y(), &brx, &bry);
-        Rectangle src{0, 0, (float)TW, (float)TH};
-        Rectangle dst{(float)tlx, (float)tly, (float)(brx - tlx),
-                      (float)(bry - tly)};
-        DrawTexturePro(m_tex, src, dst, {0, 0}, 0.0f, WHITE);
+                m_fluid.velocity_at(Vector2d(wx, wy), &vel, Fluid::Interp::Cubic);
+                val = vel.norm() / vmax;
+                const double pert = std::hypot(vel.x() - INFLOW, vel.y());
+                const double pa = std::clamp(
+                    (pert - PERT_MIN) / (PERT_REF - PERT_MIN), 0.0, 1.0);
+                const double dye = std::clamp(
+                    m_fluid.density_at(Vector2d(wx, wy), Fluid::Interp::Cubic),
+                    0.0, 1.0);
+                a = std::max(pa, dye);
+            });
 
         Rendering::draw_spring_damper(r, m_anchor_x.p, m_cyl.p);
         Rendering::draw_spring_damper(r, m_anchor_y.p, m_cyl.p);
@@ -207,6 +177,8 @@ class FlutterDemo : public DemoBase {
                  m_cyl.p.y());
         hud.line(Rendering::palette::accent3(), "vel: %+.2f, %+.2f",
                  m_cyl.v.x(), m_cyl.v.y());
+        hud.line(Rendering::palette::accent3(), "omega: %+.2f  tau: %+.3f",
+                 m_cyl.v_theta, m_fluid.obstacle_torque(m_cyl.p));
         hud.separator();
         hud.small_text("Left-drag to move; empty space = dye;",
                        Rendering::palette::text_dim());
@@ -253,38 +225,6 @@ class FlutterDemo : public DemoBase {
     }
 
   private:
-    static Color lerp_col(Rendering::Color a, Rendering::Color b, double f) {
-        return Color{(unsigned char)(a.r + f * ((double)b.r - a.r)),
-                     (unsigned char)(a.g + f * ((double)b.g - a.g)),
-                     (unsigned char)(a.b + f * ((double)b.b - a.b)), 255};
-    }
-    // speed ramp built from the active theme palette
-    static Color speed_color(double t) {
-
-        double gamma = 0.29;
-        t = std::pow(t, gamma);
-
-        const auto c0 = Rendering::palette::background();
-
-        const auto c1 = Rendering::palette::accent4();
-        const auto c2 = Rendering::palette::accent2();
-        const auto c3 = Rendering::palette::accent3();
-        const auto c4 = Rendering::palette::accent1();
-
-        if (t < 0.2)
-            return lerp_col(c0, c1, t / 0.2);
-        if (t < 0.5)
-            return lerp_col(c1, c2, (t - 0.2) / 0.3);
-        if (t < 0.8)
-            return lerp_col(c2, c3, (t - 0.5) / 0.3);
-
-        return lerp_col(c3, c4, (t - 0.8) / 0.2);
-    }
-    static double edge_fade(int tx, int ty, int TW, int TH) {
-        double fx = std::min(tx, TW - 1 - tx) / (double)FADE_PX;
-        double fy = std::min(ty, TH - 1 - ty) / (double)FADE_PX;
-        return std::clamp(std::min(fx, fy), 0.0, 1.0);
-    }
     static void draw_world_grid(Rendering::Renderer *r) {
         double lw, tw, rw, bw;
         r->screen_to_world(0, 0, &lw, &tw);
@@ -326,14 +266,12 @@ class FlutterDemo : public DemoBase {
     Solver::MouseSpringForceGenerator m_mouse;
 
     Coupling::FluidWrenchForce m_fluid_force{&m_cyl};
-    Coupling::RigidBodyBoundary m_boundary{
-        &m_cyl, [](const Vector2d &l) { return l.norm() - RADIUS; }};
+    Coupling::RigidBodyBoundary m_boundary{&m_cyl, Fluid::circle_sdf(RADIUS)};
 
     Vector2d m_rest = Vector2d::Zero();
     bool m_dragging = false;
 
-    Texture2D m_tex{};
-    std::vector<Color> m_pixels;
+    Rendering::FieldView m_field;
 };
 
 } // namespace manifold::Demo

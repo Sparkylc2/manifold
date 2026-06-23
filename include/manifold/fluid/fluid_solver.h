@@ -7,6 +7,10 @@
 namespace manifold::Fluid {
 using namespace Eigen;
 
+// field-sampling interpolation order. Linear = bilinear (C0)
+// Cubic = Catmull-Rom bicubic (C1)
+enum class Interp { Linear, Cubic };
+
 // minimal contract for the coupling layer
 // this interface is PROVISIONAL.
 class FluidSolver {

@@ -33,6 +33,8 @@ class StableFluidSolver : public FluidSolver {
         m_dens_prev.resize(x, y);
 
         m_solid.resize(x, y);
+        m_solid_u.resize(x, y);
+        m_solid_v.resize(x, y);
         m_cg_r.resize(x, y);
         m_cg_d.resize(x, y);
         m_cg_Ap.resize(x, y);
@@ -55,50 +57,34 @@ class StableFluidSolver : public FluidSolver {
         m_boundary = nullptr;
         m_has_solid = false;
         m_solid.zero();
-        m_solid_vel.setZero();
+        m_solid_u.zero();
+        m_solid_v.zero();
     }
 
     void velocity_at(const Vector2d &x, Vector2d *v) const override {
-        // continuous cell coords; interior cell (i,j) center maps to (i,j)
-        double cx = (x.x() - m_origin.x()) / m_h + 0.5;
-        double cy = (x.y() - m_origin.y()) / m_h + 0.5;
-        cx = std::clamp(cx, 1.0, (double)m_nx);
-        cy = std::clamp(cy, 1.0, (double)m_ny);
-        const int i0 = (int)cx, j0 = (int)cy;
-        const int i1 = i0 + 1, j1 = j0 + 1;
-        const double s1 = cx - i0, s0 = 1 - s1;
-        const double t1 = cy - j0, t0 = 1 - t1;
-        auto bilerp = [&](const Field2D &f) {
-            return s0 * (t0 * f(i0, j0) + t1 * f(i0, j1)) +
-                   s1 * (t0 * f(i1, j0) + t1 * f(i1, j1));
-        };
-        *v = Vector2d(bilerp(m_u), bilerp(m_v));
+        velocity_at(x, v, Interp::Linear);
+    }
+    void velocity_at(const Vector2d &x, Vector2d *v, Interp interp) const {
+        double cx, cy;
+        to_cont(x, &cx, &cy);
+        *v = Vector2d(sample(m_u, cx, cy, interp), sample(m_v, cx, cy, interp));
     }
 
-    // bilinear-sampled values at a world point (for smooth rendering)
-    double speed_at(const Vector2d &x) const {
+    double speed_at(const Vector2d &x, Interp interp = Interp::Linear) const {
         Vector2d v;
-        velocity_at(x, &v);
+        velocity_at(x, &v, interp);
         return v.norm();
     }
-    double density_at(const Vector2d &x) const {
-        double cx = (x.x() - m_origin.x()) / m_h + 0.5;
-        double cy = (x.y() - m_origin.y()) / m_h + 0.5;
-        cx = std::clamp(cx, 1.0, (double)m_nx);
-        cy = std::clamp(cy, 1.0, (double)m_ny);
-        const int i0 = (int)cx, j0 = (int)cy;
-        const int i1 = i0 + 1, j1 = j0 + 1;
-        const double s1 = cx - i0, s0 = 1 - s1;
-        const double t1 = cy - j0, t0 = 1 - t1;
-        return s0 * (t0 * m_dens(i0, j0) + t1 * m_dens(i0, j1)) +
-               s1 * (t0 * m_dens(i1, j0) + t1 * m_dens(i1, j1));
+    double density_at(const Vector2d &x, Interp interp = Interp::Linear) const {
+        double cx, cy;
+        to_cont(x, &cx, &cy);
+        return sample(m_dens, cx, cy, interp);
     }
 
-    void wrench_on(const SolidBoundary &, const Vector2d &, Vector2d *force,
-                   double *torque) const override {
-        // force computed during advance()'s penalization vs the live boundary
+    void wrench_on(const SolidBoundary &, const Vector2d &ref_world,
+                   Vector2d *force, double *torque) const override {
         *force = m_obstacle_force;
-        *torque = 0.0; // circle: net torque ~0, omitted for now
+        *torque = obstacle_torque(ref_world);
     }
 
     // --- non-interface methods ---
@@ -140,42 +126,15 @@ class StableFluidSolver : public FluidSolver {
     void advect(int b, Field2D &d, const Field2D &d0, const Field2D &u,
                 const Field2D &v, double dt) {
 
-        int i0, j0, i1, j1;
-        double x, y, s0, t0, s1, t1;
-
-        double dt0 = dt / m_h;
+        const double dt0 = dt / m_h;
         for (size_t i = 1; i <= m_nx; i++) {
             for (size_t j = 1; j <= m_ny; j++) {
-
-                x = i - dt0 * u(i, j);
-                y = j - dt0 * v(i, j);
-
-                if (x < 0.5) {
-                    x = 0.5;
-                }
-                if (x > m_nx + 0.5) {
-                    x = m_nx + 0.5;
-                }
-                i0 = (int)x;
-                i1 = i0 + 1;
-
-                if (y < 0.5) {
-                    y = 0.5;
-                }
-                if (y > m_ny + 0.5) {
-                    y = m_ny + 0.5;
-                }
-                j0 = (int)y;
-                j1 = j0 + 1;
-
-                s1 = x - i0;
-                s0 = 1 - s1;
-
-                t1 = y - j0;
-                t0 = 1 - t1;
-
-                d(i, j) = s0 * (t0 * d0(i0, j0) + t1 * d0(i0, j1)) +
-                          s1 * (t0 * d0(i1, j0) + t1 * d0(i1, j1));
+                // semi-Lagrangian back-trace, kept within the interior (+half)
+                const double x =
+                    std::clamp((double)i - dt0 * u(i, j), 0.5, m_nx + 0.5);
+                const double y =
+                    std::clamp((double)j - dt0 * v(i, j), 0.5, m_ny + 0.5);
+                d(i, j) = d0.bilerp(x, y);
             }
         }
         set_bnd(b, d);
@@ -287,7 +246,6 @@ class StableFluidSolver : public FluidSolver {
             else
                 x(0, j) = x(1, j); // p: Neumann
             // outflow: zero-gradient for velocity, Dirichlet p=0 for pressure
-            // (anchors the otherwise-singular Neumann pressure solve)
             x(m_nx + 1, j) = (b == 0) ? -x(m_nx, j) : x(m_nx, j);
         }
         // top & bottom = free-slip: tangential zero-grad, normal reflected
@@ -307,7 +265,6 @@ class StableFluidSolver : public FluidSolver {
     void set_circle_obstacle(const Vector2d &center, double radius,
                              const Vector2d &vel = Vector2d::Zero()) {
         m_has_solid = true;
-        m_solid_vel = vel;
         for (size_t i = 1; i <= m_nx; i++) {
             for (size_t j = 1; j <= m_ny; j++) {
                 const Vector2d c =
@@ -315,17 +272,17 @@ class StableFluidSolver : public FluidSolver {
                 const double sdf = (c - center).norm() - radius;
                 // smoothed solid fraction over ~1 cell
                 m_solid(i, j) = std::clamp(0.5 - sdf / m_h, 0.0, 1.0);
+                m_solid_u(i, j) = vel.x(); // uniform: rigid translation only
+                m_solid_v(i, j) = vel.y();
             }
         }
         m_boundary = nullptr; // static obstacle, not a live body
     }
 
-    // rebuild the mask from a live SolidBoundary and set the (uniform) obstacle
-    // velocity to the chi-weighted average boundary velocity (= COM velocity
-    // for a translating body)
+    // rebuild the mask from a live SolidBoundary, storing the boundary's
+    // material velocity per cell (v_com + omega x r) so the no-slip drive
+    // captures rotation, not just the COM translation.
     void rebuild_solid() {
-        m_solid_vel.setZero();
-        double wsum = 0.0;
         for (size_t i = 1; i <= m_nx; i++) {
             for (size_t j = 1; j <= m_ny; j++) {
                 const Vector2d c =
@@ -336,19 +293,22 @@ class StableFluidSolver : public FluidSolver {
                 if (chi > 0.0) {
                     Vector2d vs;
                     m_boundary->velocity_at(c, &vs);
-                    m_solid_vel += chi * vs;
-                    wsum += chi;
+                    m_solid_u(i, j) = vs.x();
+                    m_solid_v(i, j) = vs.y();
+                } else {
+                    m_solid_u(i, j) = 0.0;
+                    m_solid_v(i, j) = 0.0;
                 }
             }
         }
-        if (wsum > 0.0)
-            m_solid_vel /= wsum;
     }
 
     // drive velocity toward the (static) solid inside the mask; accumulate the
     // momentum removed as the force the fluid exerts on the obstacle
     void penalize(double dt) {
         m_obstacle_force.setZero();
+        m_obstacle_torque =
+            0.0; // about the world origin; transport in wrench_on
         if (!m_has_solid)
             return;
         const double area = m_h * m_h;
@@ -359,18 +319,29 @@ class StableFluidSolver : public FluidSolver {
                     continue;
                 const double inv = 1.0 / (1.0 + dt * chi / m_eta);
                 const double u0 = m_u(i, j), v0 = m_v(i, j);
-                // implicit drive toward the obstacle velocity
-                const double u1 = u0 * inv + (1.0 - inv) * m_solid_vel.x();
-                const double v1 = v0 * inv + (1.0 - inv) * m_solid_vel.y();
+                // implicit drive toward this cell's solid velocity (no-slip)
+                const double u1 = u0 * inv + (1.0 - inv) * m_solid_u(i, j);
+                const double v1 = v0 * inv + (1.0 - inv) * m_solid_v(i, j);
                 m_u(i, j) = u1;
                 m_v(i, j) = v1;
-                m_obstacle_force.x() += m_rho * area * (u0 - u1) / dt;
-                m_obstacle_force.y() += m_rho * area * (v0 - v1) / dt;
+                const double fx = m_rho * area * (u0 - u1) / dt;
+                const double fy = m_rho * area * (v0 - v1) / dt;
+                const Vector2d c =
+                    m_origin + Vector2d((i - 0.5) * m_h, (j - 0.5) * m_h);
+                m_obstacle_force.x() += fx;
+                m_obstacle_force.y() += fy;
+                m_obstacle_torque += c.x() * fy - c.y() * fx;
             }
         }
     }
 
     Vector2d obstacle_force() const { return m_obstacle_force; }
+    // net hydrodynamic torque about `ref` (transported from the world origin,
+    // where it is accumulated). Pass the body COM to drive its spin.
+    double obstacle_torque(const Vector2d &ref) const {
+        return m_obstacle_torque - (ref.x() * m_obstacle_force.y() -
+                                    ref.y() * m_obstacle_force.x());
+    }
     double speed(int i, int j) const {
         return std::hypot(m_u(i, j), m_v(i, j));
     }
@@ -435,7 +406,7 @@ class StableFluidSolver : public FluidSolver {
     // interior density read, i in 1..nx, j in 1..ny
     double density(int i, int j) const { return m_dens(i, j); }
 
-    // zero the per-frame source buffers (call before splatting each frame)
+    // zero the per-frame source buffers
     void clear_sources() {
         m_u_prev.zero();
         m_v_prev.zero();
@@ -452,15 +423,14 @@ class StableFluidSolver : public FluidSolver {
         m_dens_prev.zero();
     }
 
-    // dye injected as a rate (consumed by add_source, i.e. scaled by dt)
+    // dye injected as a rate (consumed by add_source)
     void add_density_source(int i, int j, double amount) {
         if (i < 1 || i > (int)m_nx || j < 1 || j > (int)m_ny)
             return;
         m_dens_prev(i, j) += amount;
     }
 
-    // velocity written straight into the field (not dt-scaled), so a mouse
-    // flick maps to the same push regardless of frame rate
+    // velocity written straight into the field (not dt-scaled),
     void add_velocity(int i, int j, double vx, double vy) {
         if (i < 1 || i > (int)m_nx || j < 1 || j > (int)m_ny)
             return;
@@ -480,6 +450,38 @@ class StableFluidSolver : public FluidSolver {
         return true;
     }
 
+    // world point -> continuous cell coords (interior center (i,j) -> (i,j)),
+    // clamped to the interior so a cubic stencil stays in-bounds
+    void to_cont(const Vector2d &x, double *cx, double *cy) const {
+        *cx = std::clamp((x.x() - m_origin.x()) / m_h + 0.5, 1.0, (double)m_nx);
+        *cy = std::clamp((x.y() - m_origin.y()) / m_h + 0.5, 1.0, (double)m_ny);
+    }
+
+    // sample a field at continuous cell coords. cubic is Catmull-Rom with a
+    // clamped 4x4 stencil at the borders
+    double sample(const Field2D &f, double cx, double cy, Interp interp) const {
+        if (interp == Interp::Linear)
+            return f.bilerp(cx, cy);
+        // cubic: Catmull-Rom with a clamped 4x4 stencil
+        const int W = (int)f.m_W, H = (int)f.m_H;
+        const int i0 = (int)cx, j0 = (int)cy;
+        const double s = cx - i0, t = cy - j0;
+        auto cl = [](int v, int hi) { return v < 0 ? 0 : (v > hi ? hi : v); };
+        auto row = [&](int j) {
+            return cubic(f(cl(i0 - 1, W - 1), j), f(cl(i0, W - 1), j),
+                         f(cl(i0 + 1, W - 1), j), f(cl(i0 + 2, W - 1), j), s);
+        };
+        return cubic(row(cl(j0 - 1, H - 1)), row(cl(j0, H - 1)),
+                     row(cl(j0 + 1, H - 1)), row(cl(j0 + 2, H - 1)), t);
+    }
+
+    // catmull-rom basis: interpolates p1..p2, tangents from p0,p3
+    static double cubic(double p0, double p1, double p2, double p3, double x) {
+        return p1 + 0.5 * x *
+                        ((p2 - p0) + x * (2 * p0 - 5 * p1 + 4 * p2 - p3 +
+                                          x * (3 * (p1 - p2) + p3 - p0)));
+    }
+
     const uint m_nx, m_ny; // grid dims
 
     const double m_h; // world size of one square cell (dt0 = dt / h)
@@ -497,12 +499,13 @@ class StableFluidSolver : public FluidSolver {
     double m_inflow = 0.0; // channel inflow speed (world/s)
 
     // volume-penalization obstacle
-    Field2D m_solid; // solid fraction chi in [0,1]
+    Field2D m_solid;              // solid fraction chi in [0,1]
+    Field2D m_solid_u, m_solid_v; // per-cell solid velocity (no-slip target)
     bool m_has_solid = false;
     double m_eta = 1e-4; // penalization permeability (smaller = more rigid)
     double m_rho = 1.0;  // fluid density (scales the reported force)
-    Vector2d m_solid_vel = Vector2d::Zero(); // obstacle velocity (moving solid)
     Vector2d m_obstacle_force = Vector2d::Zero();
+    double m_obstacle_torque = 0.0; // about world origin; see obstacle_torque()
     const SolidBoundary *m_boundary = nullptr; // live obstacle, if any
 
     Field2D m_cg_r, m_cg_d, m_cg_Ap; // matrix-free CG scratch
