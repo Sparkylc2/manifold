@@ -27,6 +27,11 @@ class RigidBodyBoundary : public Fluid::SolidBoundary {
     RigidBodyBoundary(const Solver::RigidBody *body, LocalSdf local_sdf)
         : m_body(body), m_local_sdf(std::move(local_sdf)) {}
 
+    // swap the local shape at runtime (e.g. to change aerofoil profile)
+    void set_local_sdf(LocalSdf local_sdf) {
+        m_local_sdf = std::move(local_sdf);
+    }
+
     double signed_distance(const Vector2d &x) const override {
         // world -> local, rotating by -theta about COM
         const Vector2d r = x - m_body->p;

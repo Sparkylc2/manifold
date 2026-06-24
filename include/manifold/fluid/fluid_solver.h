@@ -35,6 +35,43 @@ class FluidSolver {
     // body COM as ref_world to get the wrench)
     virtual void wrench_on(const SolidBoundary &b, const Vector2d &ref_world,
                            Vector2d *force, double *torque) const = 0;
+
+    // world coords of the grid's bottom-left corner
+    virtual const Vector2d &origin() const = 0;
+
+    // inflow/outflow channel mode (no-op for solvers without one)
+    virtual void set_channel(double inflow) { (void)inflow; }
+
+    // dye sources, clear each frame, added as a rate
+    virtual void clear_sources() {}
+    virtual void add_density_source(int i, int j, double amount) {
+        (void)i;
+        (void)j;
+        (void)amount;
+    }
+
+    // interpolated field queries at a world point
+    virtual void velocity_at(const Vector2d &x, Vector2d *v, Interp) const {
+        velocity_at(x, v);
+    }
+
+    virtual double density_at(const Vector2d &x,
+                              Interp interp = Interp::Linear) const {
+        (void)x;
+        (void)interp;
+        return 0.0;
+    }
+
+    // world point -> cell indices
+    virtual bool world_to_cell(const Vector2d &w, int *i, int *j) const {
+        (void)w;
+        (void)i;
+        (void)j;
+        return false;
+    }
+
+    // reset the whole simulation field
+    virtual void clear() {}
 };
 
 } // namespace manifold::Fluid

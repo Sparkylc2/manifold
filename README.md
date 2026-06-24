@@ -64,6 +64,7 @@ My goal with this project was to understand the way implementations look, and no
 - [Stam, Stable Fluids (SIGGRAPH 1999)](https://pages.cs.wisc.edu/~chaol/data/cs777/stam-stable_fluids.pdf)
 - [Stam, Real-Time Fluid Dynamics for Games](https://graphics.cs.cmu.edu/nsp/course/15-464/Fall09/papers/StamFluidforGames.pdf)
 - [Bridson & Müller-Fischer's SIGGRAPH course notes, Fluid Simulation](https://www.cs.ubc.ca/~rbridson/fluidsimulation/fluids_notes.pdf)
+- [Toro, Riemann Solvers and Numerical Methods for Fluid Dynamics: A Practical Introduction](https://link.springer.com/book/10.1007/b79761)
 
 ## License
 

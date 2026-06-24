@@ -5,22 +5,21 @@
 namespace manifold::Fluid {
 using namespace Eigen;
 
-// solver-agnostic view of a solid embedded in the fluid.
-//
-// coordinates are world-space. distances/velocities are in physical units.
+// view of a solid embedded in the fluid
+// coordinates are world-space, distances/velocities are in physical units
 class SolidBoundary {
   public:
     virtual ~SolidBoundary() = default;
 
-    // signed distance to the solid surface at world point x.
-    // negative inside the solid, positive outside, ~0 on the surface.
+    // signed distance to the solid surface at world point x
+    // negative inside the solid, positive outside, ~0 on the surface
     virtual double signed_distance(const Vector2d &x) const = 0;
 
     // world-space velocity of the solid material at world point x
-    // (ie. v_com + omega x r). used for no-slip/no-pen
+    // (ie. v_com + omega x r)
     virtual void velocity_at(const Vector2d &x, Vector2d *v) const = 0;
 
-    // outward surface normal at world point x (unit).
+    // outward surface normal at world point x (unit)
     // defaults to the gradient of the SDF by central differences
     virtual void normal_at(const Vector2d &x, Vector2d *n) const {
         const double h = 1e-4;
@@ -33,7 +32,7 @@ class SolidBoundary {
         *n = (len > 1e-12) ? (g / len).eval() : Vector2d(1.0, 0.0);
     }
 
-    // inside test derived from the sign of the SDF.
+    // inside test derived from the sign of the SDF
     bool inside(const Vector2d &x) const { return signed_distance(x) < 0.0; }
 };
 

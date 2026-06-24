@@ -25,6 +25,14 @@ struct SpringStyle {
     bool show_circles = true;
 };
 
+struct TorsionSpringStyle {
+    int turns = 3;          // spiral turns
+    double r_inner = 0.05;  // radius at the hub
+    double r_outer = 0.26;  // radius at the outer end
+    int segments = 96;      // polyline resolution
+    bool show_hub = true;
+};
+
 struct DamperStyle {
     double cyl_width = 0.12;
     double cyl_length = 0.3;
@@ -308,6 +316,37 @@ inline void draw_spring(Renderer *r, double x0, double y0, double x1, double y1,
 inline void draw_spring(Renderer *r, const Vector2d &p0, const Vector2d &p1,
                         const SpringStyle &style = {}) {
     draw_spring(r, p0.x(), p0.y(), p1.x(), p1.y(), style);
+}
+
+// ---- torsional spring visual: an Archimedean spiral that winds with theta ----
+inline void draw_torsion_spring(Renderer *r, double cx, double cy, double theta,
+                                const TorsionSpringStyle &style = {}) {
+    auto &t = active_theme();
+    const Color col = t.foreground;
+    const float lw = 2.0f;
+    const int segs = std::max(8, style.segments);
+    const double total = style.turns * 2.0 * M_PI;
+
+    double prev_x = 0.0, prev_y = 0.0;
+    bool first = true;
+    for (int i = 0; i <= segs; ++i) {
+        const double f = (double)i / segs;
+        const double ang = theta + f * total;
+        const double rad = style.r_inner + (style.r_outer - style.r_inner) * f;
+        const double x = cx + rad * std::cos(ang);
+        const double y = cy + rad * std::sin(ang);
+        if (!first)
+            r->draw_line(prev_x, prev_y, x, y, lw, col);
+        prev_x = x;
+        prev_y = y;
+        first = false;
+    }
+    if (style.show_hub)
+        r->draw_circle(cx, cy, style.r_inner * 0.6, col);
+}
+inline void draw_torsion_spring(Renderer *r, const Vector2d &c, double theta,
+                                const TorsionSpringStyle &style = {}) {
+    draw_torsion_spring(r, c.x(), c.y(), theta, style);
 }
 
 // ---- damper / dashpot visual ----

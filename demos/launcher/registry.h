@@ -9,7 +9,11 @@
 #include "../fluid_demo.h"
 #include "../flutter_demo.h"
 #include "../graphics_test_demo.h"
+#include "../info_demo.h"
 #include "../karman_demo.h"
+#include "../aerofoil_flutter_demo.h"
+#include "../mac_smoke_demo.h"
+// #include "../water_demo.h" // shelved: free-surface water is unstable for now
 #include "../jansen_demo.h"
 #include "../nbody_demo.h"
 #include "../pendulum_demo.h"
@@ -67,9 +71,26 @@ inline void populate_registry(DemoRegistry &registry) {
         "karman", "Karman Vortex", "Fluids",
         "Flow past a cylinder (volume penalization); speed map + force readout");
 
+    registry.add<Demo::MACSmokeDemo>(
+        "mac_smoke", "MAC Smoke", "Fluids",
+        "MICCG(0) MAC solver; buoyant plume with vorticity confinement, "
+        "left-drag to add dye");
+
+    registry.add<Demo::AerofoilFlutterDemo>(
+        "aerofoil", "Aerofoil Flutter", "Fluids",
+        "NACA aerofoil on plunge + torsional springs in a flow (penalization); "
+        "drag it, watch it flutter");
+
+    // water demo shelved while the free-surface solver is stabilised
+    // registry.add<Demo::WaterDemo>("water", "Water Tank", "Fluids", "...");
+
     registry.add<Demo::FlutterDemo>(
         "flutter", "Cylinder Flutter", "Fluids",
         "Two-way coupled cylinder on springs in a flow; drag it or add dye");
+
+    registry.add<Demo::InfoDemo>(
+        "info", "manifold — Showcase", "Sandbox",
+        "Portrait title card: wordmark + live flutter, crank, and pendulum");
 }
 
 } // namespace manifold::App
