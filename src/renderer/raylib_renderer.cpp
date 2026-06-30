@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <csignal>
 #include <cstdio>
+#include <cstdlib>
 #include <iostream>
 #include <raymath.h>
 #include <rlgl.h>
@@ -46,6 +48,8 @@ bool RaylibRenderer::init(const RendererConfig &config) {
 }
 
 void RaylibRenderer::shutdown() {
+    if (m_recording)
+        end_recording();
     if (m_has_custom_font)
         UnloadFont(m_font);
     if (m_use_fxaa) {
@@ -87,9 +91,70 @@ void RaylibRenderer::end_frame() {
                        {0, 0, (float)m_rt_width, -(float)m_rt_height}, {0, 0},
                        ::Color{255, 255, 255, 255});
         EndShaderMode();
+        if (m_recording)
+            capture_frame();
         EndDrawing();
     } else {
+        if (m_recording)
+            capture_frame();
         EndDrawing();
+    }
+}
+
+// ---- offscreen recording ----
+
+void RaylibRenderer::capture_frame() {
+    if (!m_rec_pipe)
+        return;
+    // rlReadScreenPixels returns top-down RGBA (already vertically flipped)
+    unsigned char *px = rlReadScreenPixels(m_rec_w, m_rec_h);
+    if (!px)
+        return;
+    std::fwrite(px, 1, (size_t)m_rec_w * m_rec_h * 4, m_rec_pipe);
+    RL_FREE(px);
+}
+
+bool RaylibRenderer::begin_recording(const std::string &path, int fps) {
+    if (m_recording)
+        return false;
+    if (std::system("command -v ffmpeg >/dev/null 2>&1") != 0) {
+        std::fprintf(stderr, "[record] ffmpeg not found on PATH\n");
+        return false;
+    }
+
+    // lock to the current framebuffer size (hi-dpi aware)
+    m_rec_w = GetRenderWidth();
+    m_rec_h = GetRenderHeight();
+    if (m_rec_w <= 0 || m_rec_h <= 0)
+        return false;
+
+    // a broken pipe (ffmpeg dies) must not kill us
+    std::signal(SIGPIPE, SIG_IGN);
+
+    char cmd[1024];
+    std::snprintf(
+        cmd, sizeof(cmd),
+        "ffmpeg -hide_banner -loglevel error -y -f rawvideo -pixel_format rgba "
+        "-video_size %dx%d -framerate %d -i pipe:0 -an -c:v libx264 "
+        "-preset slow -crf 14 -pix_fmt yuv420p -movflags +faststart \"%s\"",
+        m_rec_w, m_rec_h, fps, path.c_str());
+
+    m_rec_pipe = popen(cmd, "w");
+    if (!m_rec_pipe) {
+        std::fprintf(stderr, "[record] failed to launch ffmpeg\n");
+        return false;
+    }
+    m_recording = true;
+    return true;
+}
+
+void RaylibRenderer::end_recording() {
+    if (!m_recording)
+        return;
+    m_recording = false;
+    if (m_rec_pipe) {
+        pclose(m_rec_pipe);
+        m_rec_pipe = nullptr;
     }
 }
 

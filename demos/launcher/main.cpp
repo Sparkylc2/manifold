@@ -8,6 +8,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 #include <memory>
 #include <string>
 
@@ -99,11 +100,14 @@ int main(int argc, char *argv[]) {
         active_demo->setup_camera(&renderer);
     }
 
+    // ---- recording config ----
+    // [shift+R] toggles recording
+    constexpr int REC_FPS = 60;
+    constexpr double REC_SIM_DT = 1.0 / 240.0;
+
     // ---- main loop ----
     bool running = true;
     while (!renderer.should_close() && running) {
-        double dt = std::min((double)renderer.delta_time(), 1.0 / 30.0);
-
         if (IsKeyPressed(KEY_F))
             show_fps = !show_fps;
 
@@ -142,24 +146,52 @@ int main(int argc, char *argv[]) {
 
         case AppState::Running: {
             if (IsKeyPressed(KEY_ESCAPE)) {
+                if (renderer.is_recording()) {
+                    renderer.end_recording();
+                    SetTargetFPS(config.target_fps);
+                }
                 active_demo.reset();
                 browser.reset();
                 state = AppState::Browser;
                 break;
             }
 
+            // [;] start/stop recording
+            if (IsKeyPressed(KEY_SEMICOLON)) {
+                if (!renderer.is_recording()) {
+                    std::time_t tt = std::time(nullptr);
+                    char fname[128];
+                    std::strftime(fname, sizeof(fname),
+                                  "manifold_%Y%m%d_%H%M%S.mp4",
+                                  std::localtime(&tt));
+                    if (renderer.begin_recording(fname, REC_FPS)) {
+                        SetTargetFPS(0); // encode as fast as possible
+                        std::printf("[record] started -> %s\n", fname);
+                    }
+                } else {
+                    renderer.end_recording();
+                    SetTargetFPS(config.target_fps);
+                    std::printf("[record] stopped\n");
+                }
+            }
+
+            // fixed sim dt while recording, wall-clock dt otherwise
+            const double sim_dt =
+                renderer.is_recording()
+                    ? REC_SIM_DT
+                    : std::min((double)renderer.delta_time(), 1.0 / 30.0);
+
             active_demo->handle_input(&layered);
-            active_demo->process(dt);
+            active_demo->process(sim_dt);
 
             layered.begin_frame();
             active_demo->render_frame(&layered);
 
-            // bottom bar — ESC hint (UI layer: above world text)
-            {
+            if (!renderer.is_recording()) {
                 auto dim = manifold::Rendering::palette::text_dim();
                 manifold::Rendering::LayerScope ui(
                     &layered, manifold::Rendering::Layer::UI);
-                layered.draw_text("[ESC] Back to browser", 12,
+                layered.draw_text("[ESC] Back to browser    [F9] Record", 12,
                                   layered.screen_height() - 24, 14, dim);
                 draw_fps(&layered);
             }

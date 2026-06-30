@@ -155,6 +155,7 @@ class AerofoilFlutterDemo : public DemoBase {
     }
 
     void render(Rendering::Renderer *r) override {
+        draw_world_grid(r);
         const Vector2d o = m_fluid->origin();
         const double vmax = 2.0 * INFLOW;
 
@@ -284,6 +285,32 @@ class AerofoilFlutterDemo : public DemoBase {
     // grab if the cursor is within ~one chord of the foil COM
     bool near_foil(const Vector2d &w) const {
         return (w - m_foil.p).norm() < CHORD * 0.7;
+    }
+
+    static void draw_world_grid(Rendering::Renderer *r) {
+        double lw, tw, rw, bw;
+        r->screen_to_world(0, 0, &lw, &tw);
+        r->screen_to_world(r->screen_width(), r->screen_height(), &rw, &bw);
+        const auto lc = Rendering::palette::grid_line();
+        const auto ac = Rendering::palette::grid_axis();
+        const Color rlc{lc.r, lc.g, lc.b, lc.a}, rac{ac.r, ac.g, ac.b, ac.a};
+        const double sp = 1.0;
+        for (double gx = std::floor(lw / sp) * sp; gx <= rw; gx += sp) {
+            const bool ax = std::fabs(gx) < sp * 0.01;
+            int x0, y0, x1, y1;
+            r->world_to_screen(gx, bw, &x0, &y0);
+            r->world_to_screen(gx, tw, &x1, &y1);
+            DrawLineEx({(float)x0, (float)y0}, {(float)x1, (float)y1},
+                       ax ? 2.0f : 1.0f, ax ? rac : rlc);
+        }
+        for (double gy = std::floor(bw / sp) * sp; gy <= tw; gy += sp) {
+            const bool ax = std::fabs(gy) < sp * 0.01;
+            int x0, y0, x1, y1;
+            r->world_to_screen(lw, gy, &x0, &y0);
+            r->world_to_screen(rw, gy, &x1, &y1);
+            DrawLineEx({(float)x0, (float)y0}, {(float)x1, (float)y1},
+                       ax ? 2.0f : 1.0f, ax ? rac : rlc);
+        }
     }
 
     void draw_foil(Rendering::Renderer *r) {

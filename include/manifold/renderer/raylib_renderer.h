@@ -2,6 +2,7 @@
 
 #include "renderer.h"
 
+#include <cstdio>
 #include <raylib.h>
 #include <string>
 
@@ -94,6 +95,11 @@ class RaylibRenderer : public Renderer {
     int screen_height() const override;
     float delta_time() const override;
 
+    // --- offscreen frame recording ---
+    bool begin_recording(const std::string &path, int fps);
+    void end_recording();
+    bool is_recording() const { return m_recording; }
+
   private:
     // ---- coordinate transforms ----
 
@@ -116,7 +122,8 @@ class RaylibRenderer : public Renderer {
     void draw_text_proportional(::Font font, const char *text, float x, float y,
                                 float font_size, ::Color color);
 
-    // matches draw_text_proportional's advance, so measured width == drawn width
+    // matches draw_text_proportional's advance, so measured width == drawn
+    // width
     float measure_proportional(::Font font, const char *text, float font_size);
 
     // ---- FXAA setup ----
@@ -126,6 +133,9 @@ class RaylibRenderer : public Renderer {
 
     // ---- smooth line shader setup ----
     void init_smooth_line_shader();
+
+    // ---- recording ----
+    void capture_frame(); // read framebuffer, write one raw RGBA frame
 
     // ---- state ----
     double m_cam_x, m_cam_y, m_zoom;
@@ -146,6 +156,11 @@ class RaylibRenderer : public Renderer {
     bool m_use_smooth_lines = false;
     Shader m_smooth_line_shader = {};
     bool m_smooth_line_shader_loaded = false;
+
+    // recording
+    bool m_recording = false;
+    std::FILE *m_rec_pipe = nullptr;
+    int m_rec_w = 0, m_rec_h = 0;
 };
 
 } // namespace manifold::Rendering

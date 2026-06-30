@@ -326,10 +326,12 @@ class EngineDemo : public DemoBase {
             Vector2d tdc1 = *dir * tdc_dist - *perp * (cyl_half + 0.1);
             Rendering::label_with_line(r, tdc0.x(), tdc0.y(), tdc1.x(),
                                        tdc1.y(), "TDC", 11, dim, dim,
-                                       {.text_end = side,
-                                        .line_width = 1.2f,
-                                        .space = 0.05,
-                                        .gap = 0.05});
+                                       {
+                                           .gap = 0.05,
+                                           .text_end = side,
+                                           .line_width = 1.2f,
+                                           .space = 0.05,
+                                       });
 
             Vector2d bdc0 = *dir * bdc_dist + *perp * (cyl_half + 0.1);
             Vector2d bdc1 = *dir * bdc_dist - *perp * (cyl_half + 0.1);

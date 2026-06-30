@@ -2,23 +2,24 @@
 
 #include <manifold/app/demo_registry.h>
 
+#include "../aerofoil_flutter_demo.h"
 #include "../cart_pendulum_demo.h"
 #include "../crank_slider.h"
+#include "../diffuser_demo.h"
 #include "../double_pendulum_demo.h"
 #include "../engine_demo.h"
 #include "../fluid_demo.h"
 #include "../flutter_demo.h"
 #include "../graphics_test_demo.h"
 #include "../info_demo.h"
-#include "../karman_demo.h"
-#include "../aerofoil_flutter_demo.h"
-#include "../mac_smoke_demo.h"
-// #include "../water_demo.h" // shelved: free-surface water is unstable for now
 #include "../jansen_demo.h"
+#include "../karman_demo.h"
 #include "../nbody_demo.h"
 #include "../pendulum_demo.h"
+#include "../radial_engine_demo.h"
 #include "../solar_system_demo.h"
 #include "../spring_demo.h"
+#include "../supersonic_demo.h"
 #include "../truss_demo.h"
 
 namespace manifold::App {
@@ -52,8 +53,8 @@ inline void populate_registry(DemoRegistry &registry) {
     registry.add<Demo::CrankSliderDemo>(
         "crank_slider", "Crank-Slider", "Mechanisms",
         "Motor-driven crank with spring-coupled slider");
-    // registry.add<Demo::JansenDemo>("jansen", "Jansen Linkage", "Mechanisms",
-    //                                "Strandbeest leg with foot-path tracing");
+    registry.add<Demo::JansenDemo>("jansen", "Jansen Linkage", "Mechanisms",
+                                   "Strandbeest leg with foot-path tracing");
 
     registry.add<Demo::GraphicsTestDemo>(
         "graphics_test", "Graphics Test", "Sandbox",
@@ -63,26 +64,33 @@ inline void populate_registry(DemoRegistry &registry) {
         "engine", "Engine", "Mechanisms",
         "Vertical crank-slider with flywheel, spring return, annotations");
 
+    registry.add<Demo::RadialEngineDemo>(
+        "radial_engine", "Radial Engine", "Mechanisms",
+        "7-cylinder radial: one driven crank, 15 bodies, 29 joints, pistons "
+        "pumping in a star");
+
     registry.add<Demo::FluidDemo>(
         "fluid", "Stable Fluids", "Fluids",
         "Stam stable-fluid solver; left-drag to add velocity and dye");
 
-    registry.add<Demo::KarmanDemo>(
-        "karman", "Karman Vortex", "Fluids",
-        "Flow past a cylinder (volume penalization); speed map + force readout");
-
-    registry.add<Demo::MACSmokeDemo>(
-        "mac_smoke", "MAC Smoke", "Fluids",
-        "MICCG(0) MAC solver; buoyant plume with vorticity confinement, "
-        "left-drag to add dye");
+    registry.add<Demo::KarmanDemo>("karman", "Karman Vortex", "Fluids",
+                                   "Flow past a cylinder (volume "
+                                   "penalization); speed map + force readout");
 
     registry.add<Demo::AerofoilFlutterDemo>(
         "aerofoil", "Aerofoil Flutter", "Fluids",
         "NACA aerofoil on plunge + torsional springs in a flow (penalization); "
         "drag it, watch it flutter");
 
-    // water demo shelved while the free-surface solver is stabilised
-    // registry.add<Demo::WaterDemo>("water", "Water Tank", "Fluids", "...");
+    registry.add<Demo::SupersonicDemo>(
+        "supersonic", "Supersonic Wedge", "Fluids",
+        "Live 2D compressible Euler (HLL); oblique shock off a wedge, "
+        "schlieren view");
+
+    registry.add<Demo::DiffuserDemo>(
+        "diffuser", "Supersonic Diffuser", "Fluids",
+        "Converging-diverging duct: shock train -> terminal shock -> subsonic; "
+        "dye streaks + Mach colour");
 
     registry.add<Demo::FlutterDemo>(
         "flutter", "Cylinder Flutter", "Fluids",
