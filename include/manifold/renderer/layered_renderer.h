@@ -96,6 +96,7 @@ class LayeredRenderer : public Renderer {
     int screen_width() const override;
     int screen_height() const override;
     float delta_time() const override;
+    bool is_recording() const override;
 
   private:
     enum class Op {

@@ -106,15 +106,23 @@ void RaylibRenderer::end_frame() {
 void RaylibRenderer::capture_frame() {
     if (!m_rec_pipe)
         return;
-    // rlReadScreenPixels returns top-down RGBA (already vertically flipped)
-    unsigned char *px = rlReadScreenPixels(m_rec_w, m_rec_h);
-    if (!px)
+    rlDrawRenderBatchActive();
+    unsigned char *full = rlReadScreenPixels(m_fb_w, m_fb_h);
+    if (!full)
         return;
-    std::fwrite(px, 1, (size_t)m_rec_w * m_rec_h * 4, m_rec_pipe);
-    RL_FREE(px);
+    const size_t out_row = (size_t)m_rec_w * 4;
+    const size_t fb_row = (size_t)m_fb_w * 4;
+    for (int y = 0; y < m_rec_h; ++y) {
+        const unsigned char *src =
+            full + (size_t)(m_crop_y + y) * fb_row + (size_t)m_crop_x * 4;
+        std::fwrite(src, 1, out_row, m_rec_pipe);
+    }
+    RL_FREE(full);
 }
 
-bool RaylibRenderer::begin_recording(const std::string &path, int fps) {
+bool RaylibRenderer::begin_recording(const std::string &path, int fps,
+                                     int crop_x, int crop_y, int crop_w,
+                                     int crop_h) {
     if (m_recording)
         return false;
     if (std::system("command -v ffmpeg >/dev/null 2>&1") != 0) {
@@ -123,8 +131,28 @@ bool RaylibRenderer::begin_recording(const std::string &path, int fps) {
     }
 
     // lock to the current framebuffer size (hi-dpi aware)
-    m_rec_w = GetRenderWidth();
-    m_rec_h = GetRenderHeight();
+    m_fb_w = GetRenderWidth();
+    m_fb_h = GetRenderHeight();
+    if (m_fb_w <= 0 || m_fb_h <= 0)
+        return false;
+
+    if (crop_w <= 0 || crop_h <= 0) {
+        crop_x = 0;
+        crop_y = 0;
+        crop_w = m_fb_w;
+        crop_h = m_fb_h;
+    }
+    crop_x = std::clamp(crop_x, 0, m_fb_w - 1);
+    crop_y = std::clamp(crop_y, 0, m_fb_h - 1);
+    crop_w = std::min(crop_w, m_fb_w - crop_x);
+    crop_h = std::min(crop_h, m_fb_h - crop_y);
+    crop_w &= ~1; // H.264 yuv420p needs even dimensions
+    crop_h &= ~1;
+
+    m_crop_x = crop_x;
+    m_crop_y = crop_y;
+    m_rec_w = crop_w;
+    m_rec_h = crop_h;
     if (m_rec_w <= 0 || m_rec_h <= 0)
         return false;
 
@@ -186,7 +214,8 @@ void RaylibRenderer::draw_line(double x0, double y0, double x1, double y1,
 }
 
 void RaylibRenderer::draw_smooth_line(double x0, double y0, double x1,
-                                      double y1, double thickness, Color color) {
+                                      double y1, double thickness,
+                                      Color color) {
     draw_aa_line(w2sx(x0), w2sy(y0), w2sx(x1), w2sy(y1), (float)thickness,
                  color);
 }
@@ -215,7 +244,8 @@ void RaylibRenderer::draw_arrow(double x0, double y0, double x1, double y1,
     if (len < 1e-3f) // only bail on a zero-length (directionless) arrow
         return;
     float nx = dx / len, ny = dy / len;
-    const float hl = 12.0f, hw = hl * 0.5f; // constant head, independent of length
+    const float hl = 12.0f,
+                hw = hl * 0.5f; // constant head, independent of length
     DrawTriangle({sx1, sy1}, {sx1 - nx * hl + ny * hw, sy1 - ny * hl - nx * hw},
                  {sx1 - nx * hl - ny * hw, sy1 - ny * hl + nx * hw},
                  detail::to_rl(color));
@@ -344,7 +374,8 @@ float RaylibRenderer::w2sy(double wy) const {
 // ---- rounded bar ----
 
 void RaylibRenderer::draw_rounded_bar(double x, double y, double theta,
-                                      double length, double width, Color color) {
+                                      double length, double width,
+                                      Color color) {
     float cx = w2sx(x), cy = w2sy(y);
     float sl = (float)(length * m_zoom), sw = (float)(width * m_zoom);
     float deg = (float)(-theta * 180.0 / M_PI);
@@ -404,10 +435,10 @@ void RaylibRenderer::load_font(const std::string &path, int base_size) {
         int count = 0;
         for (int i = 32; i < 256; ++i)
             codepoints[count++] = i;
-        int extras[] = {
-            0x03B1, 0x03B2, 0x03B3, 0x03B4, 0x03B8, 0x03C0, // α β γ δ θ π
-            0x03C9, 0x2190, 0x2191, 0x2192, 0x2193,         // ω ← ↑ → ↓
-            0x221A, 0x2248, 0x2260, 0x2264, 0x2265};        // √ ≈ ≠ ≤ ≥
+        int extras[] = {0x03B1, 0x03B2, 0x03B3, 0x03B4, 0x03B8,
+                        0x03C0,                                  // α β γ δ θ π
+                        0x03C9, 0x2190, 0x2191, 0x2192, 0x2193,  // ω ← ↑ → ↓
+                        0x221A, 0x2248, 0x2260, 0x2264, 0x2265}; // √ ≈ ≠ ≤ ≥
         for (int e : extras)
             codepoints[count++] = e;
 

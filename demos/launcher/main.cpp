@@ -164,7 +164,17 @@ int main(int argc, char *argv[]) {
                     std::strftime(fname, sizeof(fname),
                                   "manifold_%Y%m%d_%H%M%S.mp4",
                                   std::localtime(&tt));
-                    if (renderer.begin_recording(fname, REC_FPS)) {
+                    // in portrait mode, crop the capture to the 9:16 strip
+                    int cx = 0, cy = 0, cw = 0, ch = 0; // 0 = full frame
+                    if (active_demo->portrait_mode()) {
+                        int fw = GetRenderWidth(), fh = GetRenderHeight();
+                        cw = fh * 9 / 16;
+                        cx = (fw - cw) / 2;
+                        cy = 0;
+                        ch = fh;
+                    }
+                    if (renderer.begin_recording(fname, REC_FPS, cx, cy, cw,
+                                                 ch)) {
                         SetTargetFPS(0); // encode as fast as possible
                         std::printf("[record] started -> %s\n", fname);
                     }
@@ -191,7 +201,7 @@ int main(int argc, char *argv[]) {
                 auto dim = manifold::Rendering::palette::text_dim();
                 manifold::Rendering::LayerScope ui(
                     &layered, manifold::Rendering::Layer::UI);
-                layered.draw_text("[ESC] Back to browser    [F9] Record", 12,
+                layered.draw_text("[ESC] Back to browser    [;] Record", 12,
                                   layered.screen_height() - 24, 14, dim);
                 draw_fps(&layered);
             }

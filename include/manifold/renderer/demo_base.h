@@ -40,7 +40,7 @@ class DemoBase {
         render(r);
         for (auto &fn : m_overlays)
             fn(r);
-        if (m_portrait_mode)
+        if (m_portrait_mode && !r->is_recording())
             draw_portrait_guides(r);
     }
 

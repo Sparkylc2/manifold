@@ -408,7 +408,7 @@ class JansenDemo : public DemoBase {
     }
 
     void render_hud(Rendering::Renderer *r) {
-        Rendering::HUDPanel hud(r, 12, 12);
+        Rendering::HUDPanel hud(r, hud_x(r), 12);
         hud.title("JANSEN WALKER (4 LEG)", Rendering::palette::accent2());
         hud.line(Rendering::palette::text(), "Crank: %.1f deg",
                  std::fmod(m_crank_R.theta * 180.0 / M_PI, 360.0));

@@ -184,6 +184,7 @@ int LayeredRenderer::measure_text(const std::string &text, int font_size) {
 int LayeredRenderer::screen_width() const { return m_inner->screen_width(); }
 int LayeredRenderer::screen_height() const { return m_inner->screen_height(); }
 float LayeredRenderer::delta_time() const { return m_inner->delta_time(); }
+bool LayeredRenderer::is_recording() const { return m_inner->is_recording(); }
 
 bool LayeredRenderer::pinned() const { return m_current != Layer::Auto; }
 

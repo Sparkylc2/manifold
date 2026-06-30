@@ -113,7 +113,9 @@ class Renderer {
     virtual int screen_height() const = 0;
     virtual float delta_time() const = 0;
 
-    // layer routing — no-op for immediate renderers, honored by recording ones
+    virtual bool is_recording() const { return false; }
+
+    // layer routing
     virtual void set_layer(Layer) {}
     virtual Layer current_layer() const { return Layer::Content; }
 };
