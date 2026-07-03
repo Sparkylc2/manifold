@@ -23,10 +23,6 @@ constexpr int Right = 1;
 constexpr int Middle = 2;
 } // namespace mouse
 
-// draw layers, flushed bottom-to-top by a recording renderer. Auto is the
-// default: primitives route implicitly (text -> Text, grid -> Grid, body
-// shadows -> Shadow, rest -> Content). Setting any real layer pins every
-// subsequent draw to it, overriding the implicit routing.
 enum class Layer { Grid, Shadow, Content, Text, UI, Count, Auto };
 
 struct RendererConfig {
@@ -37,10 +33,10 @@ struct RendererConfig {
     bool vsync = true;
     bool msaa = true;
     bool highdpi = true;
-    bool fxaa = false; // post-process FXAA (alternative to MSAA)
+    bool fxaa = false;
     bool smooth_lines = true;
-    std::string font_path = ""; // empty = use default font
-    int font_size = 48;         // base rasterization size for custom fonts
+    std::string font_path = "";
+    int font_size = 48;
 };
 
 class Renderer {
@@ -89,6 +85,13 @@ class Renderer {
     }
     virtual void draw_screen_rect(int x, int y, int w, int h, Color color) = 0;
 
+    virtual void draw_texture(unsigned int tex_id, int tex_w, int tex_h,
+                              int dst_x, int dst_y, int dst_w, int dst_h,
+                              bool flip_v) {
+        (void)tex_id, (void)tex_w, (void)tex_h, (void)dst_x, (void)dst_y;
+        (void)dst_w, (void)dst_h, (void)flip_v;
+    }
+
     // rendered width of text in the active font, in pixels
     virtual int measure_text(const std::string &text, int font_size) = 0;
 
@@ -120,7 +123,6 @@ class Renderer {
     virtual Layer current_layer() const { return Layer::Content; }
 };
 
-// scoped layer switch, restores the previous layer on exit
 struct LayerScope {
     Renderer *r;
     Layer prev;

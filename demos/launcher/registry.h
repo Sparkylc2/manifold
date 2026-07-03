@@ -5,22 +5,26 @@
 #include "../aerofoil_flutter_demo.h"
 #include "../cart_pendulum_demo.h"
 #include "../crank_slider.h"
+#include "../cube_demo.h"
 #include "../diffuser_demo.h"
 #include "../double_pendulum_demo.h"
 #include "../engine_demo.h"
 #include "../fluid_demo.h"
 #include "../flutter_demo.h"
 #include "../graphics_test_demo.h"
+#include "../heat_demo.h"
 #include "../info_demo.h"
 #include "../jansen_demo.h"
 #include "../karman_demo.h"
 #include "../nbody_demo.h"
+#include "../pde_demo.h"
 #include "../pendulum_demo.h"
 #include "../radial_engine_demo.h"
 #include "../solar_system_demo.h"
 #include "../spring_demo.h"
 #include "../supersonic_demo.h"
 #include "../truss_demo.h"
+#include "../wave_demo.h"
 
 namespace manifold::App {
 
@@ -60,6 +64,10 @@ inline void populate_registry(DemoRegistry &registry) {
         "graphics_test", "Graphics Test", "Sandbox",
         "All visual elements: constraints, forces, annotations, bodies");
 
+    registry.add<Demo::CubeDemo>(
+        "cube3d", "3D Cube", "Sandbox",
+        "Orbitable shaded cube: offscreen 3D composited into the 2D scene");
+
     registry.add<Demo::EngineDemo>(
         "engine", "Engine", "Mechanisms",
         "Vertical crank-slider with flywheel, spring return, annotations");
@@ -95,6 +103,21 @@ inline void populate_registry(DemoRegistry &registry) {
     registry.add<Demo::FlutterDemo>(
         "flutter", "Cylinder Flutter", "Fluids",
         "Two-way coupled cylinder on springs in a flow; drag it or add dye");
+
+    registry.add<Demo::PDEDemo>(
+        "pde", "Poisson", "PDE",
+        "Steady Poisson solve (5-point Laplacian, Dirichlet BCs); dipole "
+        "source drawn as a diverging field");
+
+    registry.add<Demo::HeatDemo>(
+        "heat", "Heat Diffusion", "PDE",
+        "Transient heat equation (explicit sub-stepping); left-drag to add "
+        "heat, watch it diffuse");
+
+    registry.add<Demo::WaveDemo>(
+        "wave", "Wave Drum", "PDE",
+        "Wave equation on a circular drum (Bessel modes); gridded 3D surface, "
+        "[space] to pluck");
 
     registry.add<Demo::InfoDemo>(
         "info", "manifold — Showcase", "Sandbox",

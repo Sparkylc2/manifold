@@ -13,12 +13,12 @@ The solver architecture is **HEAVILY** (to a point where most of the structure i
 - Constraint types: link (pin joint), line (prismatic), fixed position, fixed rotation, gear, motor, 
 - Force generators: gravity, direct force application, spring, damper, planetary gravity
 - PID control
+- Fluid simulation (SPH, MAC, Eulerian grid)
 
 
 **Planned:**
 - More ODE/PDE solvers (spectral methods)
 - 3D rigid body dynamics (potentially, if we exclude the pain that is collision detection)
-- Fluid simulation (SPH, MAC, Eulerian grid)
 - CNN inference on flow fields
 - MPC / LQR controllers
 - Scene serialization

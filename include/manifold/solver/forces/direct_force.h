@@ -7,23 +7,16 @@ namespace manifold::Solver {
 
 class DirectForceGenerator : public ForceGenerator {
   public:
-    DirectForceGenerator() {
-        m_f.setZero();
-        m_l.setZero();
-
-        m_body = nullptr;
-    }
+    DirectForceGenerator();
     ~DirectForceGenerator() override = default;
 
-    void apply(SystemState *state) override {
-        state->apply_force(m_l, m_f, m_body->index);
-    }
+    void apply(SystemState *state) override;
 
-    void set_force(const Vector2d &f) { m_f = f; }
-    void set_local_position(const Vector2d &l) { m_l = l; }
-    void set_body(RigidBody *body) { m_body = body; }
+    void set_force(const Vector2d &f);
+    void set_local_position(const Vector2d &l);
+    void set_body(RigidBody *body);
 
-    Vector2d get_force() const { return m_f; }
+    Vector2d get_force() const;
 
   private:
     RigidBody *m_body;

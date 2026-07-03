@@ -310,6 +310,21 @@ void RaylibRenderer::draw_screen_rect(int x, int y, int w, int h, Color color) {
     DrawRectangle(x, y, w, h, detail::to_rl(color));
 }
 
+void RaylibRenderer::draw_texture(unsigned int tex_id, int tex_w, int tex_h,
+                                  int dst_x, int dst_y, int dst_w, int dst_h,
+                                  bool flip_v) {
+    Texture2D t{};
+    t.id = tex_id;
+    t.width = tex_w;
+    t.height = tex_h;
+    t.mipmaps = 1;
+    t.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
+    const Rectangle src{0.0f, 0.0f, (float)tex_w,
+                        flip_v ? -(float)tex_h : (float)tex_h};
+    const Rectangle dst{(float)dst_x, (float)dst_y, (float)dst_w, (float)dst_h};
+    DrawTexturePro(t, src, dst, {0, 0}, 0.0f, ::Color{255, 255, 255, 255});
+}
+
 int RaylibRenderer::measure_text(const std::string &text, int font_size) {
     if (m_has_custom_font)
         return (int)measure_proportional(m_font, text.c_str(),

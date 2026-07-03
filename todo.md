@@ -7,3 +7,13 @@
 
 Better advection on that grid (MacCormack/BFECC, or RK semi-Lagrangian). This is the one that actually makes the aerofoil look like CFD instead of mush — right now your effective Reynolds number is dominated by numerical diffusion from Stam's first-order advection, and MAC doesn't fix that. Arguably higher-impact than MAC itself.
 Proper viscous term + a preconditioned/multigrid pressure solve once you push resolution.
+
+
+
+
+ideas:
+- turbojet modelled fully including temperature and vorticity in the thing etc etc. maybe use a reduced order model
+- really cool 3D pde in time for visuals
+- get the thermal stuff down so we can assign thermal solving to bodies, and have it couple with everything
+- have a "speaker" and "microphone" in a fluid field which supports compressibility
+- show strings or a drum vibrating after being struck

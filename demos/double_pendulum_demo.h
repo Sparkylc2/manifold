@@ -30,7 +30,8 @@ class DoublePendulumDemo : public DemoBase {
     static constexpr double Gravity = 9.81;
     static constexpr int SimSteps = 100;
 
-    // displacement from the downward vertical (theta = pi/2 hangs straight down)
+    // displacement from the downward vertical (theta = pi/2 hangs straight
+    // down)
     static constexpr double InitAngle1 = 0.6;
     static constexpr double InitAngle2 = 0.4;
     static constexpr double KickTorque = 120.0;
@@ -56,8 +57,8 @@ class DoublePendulumDemo : public DemoBase {
         m_bar1.m = M1;
         m_bar1.I = M1 * L1 * L1 / 12.0;
         m_bar1.theta = theta1;
-        m_bar1.p =
-            Vector2d(-std::cos(theta1) * L1 / 2.0, -std::sin(theta1) * L1 / 2.0);
+        m_bar1.p = Vector2d(-std::cos(theta1) * L1 / 2.0,
+                            -std::sin(theta1) * L1 / 2.0);
         m_system.add_body(&m_bar1);
 
         Vector2d joint1;
@@ -157,10 +158,10 @@ class DoublePendulumDemo : public DemoBase {
         // ---- trail of the tip ----
         for (int i = 1; i < (int)m_trail.size(); ++i) {
             double alpha = (double)i / m_trail.size();
-            auto tc = Rendering::Color::rgba(
-                a1.r, a1.g, a1.b, (unsigned char)(200 * alpha));
-            r->draw_line(m_trail[i - 1].x(), m_trail[i - 1].y(),
-                         m_trail[i].x(), m_trail[i].y(), 1.5f, tc);
+            auto tc = Rendering::Color::rgba(a1.r, a1.g, a1.b,
+                                             (unsigned char)(200 * alpha));
+            r->draw_line(m_trail[i - 1].x(), m_trail[i - 1].y(), m_trail[i].x(),
+                         m_trail[i].y(), 1.5f, tc);
         }
 
         Vector2d joint;
@@ -173,8 +174,9 @@ class DoublePendulumDemo : public DemoBase {
             r, 0.0, 0.0, -M_PI / 2.0, m_bar1.theta - M_PI, L1 * 0.18, 1.5f, a2,
             dim, {.ref_line_len = L1 * 0.32, .ref_line_thickness = 1.5});
         Rendering::draw_angle_marker(
-            r, joint.x(), joint.y(), -M_PI / 2.0, m_bar2.theta - M_PI, L2 * 0.18,
-            1.5f, a3, dim, {.ref_line_len = L2 * 0.32, .ref_line_thickness = 1.5});
+            r, joint.x(), joint.y(), -M_PI / 2.0, m_bar2.theta - M_PI,
+            L2 * 0.18, 1.5f, a3, dim,
+            {.ref_line_len = L2 * 0.32, .ref_line_thickness = 1.5});
 
         // ---- scene ----
         draw_body_node(r, Vector2d(0, 0), 0.15, {.fill = a2});

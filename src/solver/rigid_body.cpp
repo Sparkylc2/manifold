@@ -9,7 +9,7 @@ RigidBody::RigidBody() {
     reset();
 }
 
-RigidBody::~RigidBody() { /* void */ }
+RigidBody::~RigidBody() {}
 
 double RigidBody::energy() const {
     const double speed_2 = v.squaredNorm();
@@ -29,7 +29,6 @@ void RigidBody::local_to_world(const Vector2d &l, Vector2d *w) const {
 
     Rotation2Dd rot(theta);
     *w = rot * l + p; // rotation * local + position
-    //
 }
 
 void RigidBody::world_to_local(const Vector2d &w, Vector2d *l) const {

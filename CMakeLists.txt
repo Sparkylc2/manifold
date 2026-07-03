@@ -16,15 +16,38 @@ include(cmake/FetchDependencies.cmake)
 
 # ---- solver library  ----
 add_library(manifold_solver STATIC
-    src/solver/rigid_body_system.cpp
-    src/solver/rigid_body.cpp
-    src/solver/system_state.cpp
-    src/solver/ode_solver.cpp
-    src/solver/rk4_ode_solver.cpp
-    src/solver/sle_solver.cpp
     src/solver/conjugate_gradient_sle_solver.cpp
     src/solver/constraint.cpp
+    src/solver/euler_ode_solver.cpp
+    src/solver/gauss_seidel_sle_solver.cpp
+    src/solver/gaussian_elimination_sle_solver.cpp
     src/solver/generic_body_system.cpp
+    src/solver/ode_solver.cpp
+    src/solver/rigid_body_system.cpp
+    src/solver/rigid_body.cpp
+    src/solver/rk4_ode_solver.cpp
+    src/solver/sle_solver.cpp
+    src/solver/system_state.cpp
+    src/solver/forces/barnes_hut_gravity.cpp
+    src/solver/forces/constant_speed_motor.cpp
+    src/solver/forces/control_torque.cpp
+    src/solver/forces/damper.cpp
+    src/solver/forces/direct_force.cpp
+    src/solver/forces/exact_gravity.cpp
+    src/solver/forces/impulse.cpp
+    src/solver/forces/mouse_spring.cpp
+    src/solver/forces/spring.cpp
+    src/solver/forces/torsion_spring.cpp
+    src/solver/forces/uniform_gravity.cpp
+    src/solver/constraints/distance_constraint.cpp
+    src/solver/constraints/fixed_position_constraint.cpp
+    src/solver/constraints/fixed_rotation_constraint.cpp
+    src/solver/constraints/gear_constraint.cpp
+    src/solver/constraints/line_constraint.cpp
+    src/solver/constraints/link_constraint.cpp
+    src/solver/constraints/no_slip_constraint.cpp
+    src/solver/constraints/rolling_constraint.cpp
+    src/solver/constraints/rotation_friction_constraint.cpp
 )
 target_include_directories(manifold_solver PUBLIC include)
 target_link_libraries(manifold_solver PUBLIC Eigen3::Eigen)
@@ -33,13 +56,27 @@ target_link_libraries(manifold_solver PUBLIC Eigen3::Eigen)
 add_library(manifold_control INTERFACE)
 target_include_directories(manifold_control INTERFACE include)
 
+# ---- pde (header-only) ----
+add_library(manifold_pde INTERFACE)
+target_include_directories(manifold_pde INTERFACE include)
+target_link_libraries(manifold_pde INTERFACE Eigen3::Eigen)
+
 # ---- renderer (links raylib) ----
 add_library(manifold_renderer STATIC
     src/renderer/raylib_renderer.cpp
     src/renderer/layered_renderer.cpp
+    src/renderer/camera_controller.cpp
+    src/renderer/hud_panel.cpp
+    src/renderer/scene3d.cpp
+    src/renderer/field_view.cpp
+    src/renderer/demo_base.cpp
+    src/renderer/body_visuals.cpp
+    src/renderer/plot_widget.cpp
+    src/renderer/annotation_visuals.cpp
+    src/renderer/constraint_visuals.cpp
 )
 target_include_directories(manifold_renderer PUBLIC include)
-target_link_libraries(manifold_renderer PUBLIC raylib)
+target_link_libraries(manifold_renderer PUBLIC raylib manifold_solver Eigen3::Eigen)
 
 # ---- demos & tests ----
 add_subdirectory(demos)

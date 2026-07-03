@@ -136,6 +136,15 @@ void LayeredRenderer::draw_screen_rect(int x, int y, int w, int h,
     push(resolve(Layer::Content), c);
 }
 
+void LayeredRenderer::draw_texture(unsigned int tex_id, int tex_w, int tex_h,
+                                   int dst_x, int dst_y, int dst_w, int dst_h,
+                                   bool flip_v) {
+    Cmd c{Op::TexQuad};
+    c.i0 = (int)tex_id, c.i1 = tex_w, c.i2 = tex_h, c.i3 = flip_v ? 1 : 0;
+    c.a = dst_x, c.b = dst_y, c.c = dst_w, c.d = dst_h;
+    push(resolve(Layer::Content), c);
+}
+
 // --- pass-through ---
 
 bool LayeredRenderer::init(const RendererConfig &cfg) {
@@ -268,6 +277,10 @@ void LayeredRenderer::execute(const Cmd &c) {
         break;
     case Op::ScreenRect:
         m_inner->draw_screen_rect(c.i0, c.i1, c.i2, c.i3, c.col);
+        break;
+    case Op::TexQuad:
+        m_inner->draw_texture((unsigned int)c.i0, c.i1, c.i2, (int)c.a,
+                              (int)c.b, (int)c.c, (int)c.d, c.i3 != 0);
         break;
     }
 }

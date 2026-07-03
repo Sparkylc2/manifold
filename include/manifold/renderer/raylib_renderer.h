@@ -69,6 +69,9 @@ class RaylibRenderer : public Renderer {
 
     void draw_screen_rect(int x, int y, int w, int h, Color color) override;
 
+    void draw_texture(unsigned int tex_id, int tex_w, int tex_h, int dst_x,
+                      int dst_y, int dst_w, int dst_h, bool flip_v) override;
+
     int measure_text(const std::string &text, int font_size) override;
 
     // --- camera ---

@@ -8,25 +8,15 @@ namespace manifold::Solver {
 
 class ControlTorque : public ForceGenerator {
   public:
-    void apply(SystemState *state) override {
-        double tau = std::clamp(m_torque, -m_max_torque, m_max_torque);
+    void apply(SystemState *state) override;
 
-        if (m_body_0 && m_body_0->index >= 0)
-            state->t[m_body_0->index] += tau;
-        if (m_body_1 && m_body_1->index >= 0)
-            state->t[m_body_1->index] -= tau;
-    }
+    void set_bodies(RigidBody *b0, RigidBody *b1);
 
-    void set_bodies(RigidBody *b0, RigidBody *b1) {
-        m_body_0 = b0;
-        m_body_1 = b1;
-    }
+    void set_torque(double tau);
+    double torque() const;
 
-    void set_torque(double tau) { m_torque = tau; }
-    double torque() const { return m_torque; }
-
-    void set_max_torque(double t) { m_max_torque = t; }
-    double max_torque() const { return m_max_torque; }
+    void set_max_torque(double t);
+    double max_torque() const;
 
   private:
     RigidBody *m_body_0 = nullptr;
