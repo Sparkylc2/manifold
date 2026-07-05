@@ -1,5 +1,5 @@
 add_executable(manifold main.cpp ../../src/app/raygui_impl.cpp)
-target_link_libraries(manifold PRIVATE manifold_solver manifold_control manifold_pde manifold_renderer raygui)
+target_link_libraries(manifold PRIVATE manifold_solver manifold_control manifold_pde manifold_ai manifold_renderer raygui)
 target_include_directories(manifold PRIVATE ${CMAKE_SOURCE_DIR}/include)
 
 # copy assets next to executable

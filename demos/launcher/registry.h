@@ -19,11 +19,13 @@
 #include "../nbody_demo.h"
 #include "../pde_demo.h"
 #include "../pendulum_demo.h"
+#include "../pod_karman_demo.h"
 #include "../radial_engine_demo.h"
 #include "../solar_system_demo.h"
 #include "../spring_demo.h"
 #include "../supersonic_demo.h"
 #include "../truss_demo.h"
+#include "../turbofan_demo.h"
 #include "../wave_demo.h"
 
 namespace manifold::App {
@@ -85,6 +87,11 @@ inline void populate_registry(DemoRegistry &registry) {
                                    "Flow past a cylinder (volume "
                                    "penalization); speed map + force readout");
 
+    registry.add<Demo::PODKarmanDemo>(
+        "karman_pod", "Karman POD", "Fluids",
+        "Live POD of the vortex street: top-6 spatial modes recomputed from a "
+        "rolling snapshot window and drawn as their own flow fields");
+
     registry.add<Demo::AerofoilFlutterDemo>(
         "aerofoil", "Aerofoil Flutter", "Fluids",
         "NACA aerofoil on plunge + torsional springs in a flow (penalization); "
@@ -103,6 +110,11 @@ inline void populate_registry(DemoRegistry &registry) {
     registry.add<Demo::FlutterDemo>(
         "flutter", "Cylinder Flutter", "Fluids",
         "Two-way coupled cylinder on springs in a flow; drag it or add dye");
+
+    registry.add<Demo::TurbofanDemo>(
+        "turbofan", "Turbofan", "Propulsion",
+        "Two-spool turbofan cutaway: 3D MAC solver with actuator-disk blade "
+        "rows, 0D cycle model driving the station Tt/Pt bars (not realtime)");
 
     registry.add<Demo::PDEDemo>(
         "pde", "Poisson", "PDE",

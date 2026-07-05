@@ -65,6 +65,9 @@ My goal with this project was to understand the way implementations look, and no
 - [Stam, Real-Time Fluid Dynamics for Games](https://graphics.cs.cmu.edu/nsp/course/15-464/Fall09/papers/StamFluidforGames.pdf)
 - [Bridson & Müller-Fischer's SIGGRAPH course notes, Fluid Simulation](https://www.cs.ubc.ca/~rbridson/fluidsimulation/fluids_notes.pdf)
 - [Toro, Riemann Solvers and Numerical Methods for Fluid Dynamics: A Practical Introduction](https://link.springer.com/book/10.1007/b79761)
+- [Fedkiw, Stam & Jensen, *Visual Simulation of Smoke* (SIGGRAPH 2001)](https://web.stanford.edu/class/cs237d/smoke.pdf) 
+- [Angot, Bruneau & Fabrie, *A penalization method to take into account obstacles in incompressible viscous flows* (Numer. Math. 1999)](https://link.springer.com/article/10.1007/s002110050401) 
+- Hill & Peterson, *Mechanics and Thermodynamics of Propulsion* — component efficiencies, turbine work balance
 
 ## License
 

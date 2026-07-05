@@ -52,6 +52,18 @@ add_library(manifold_solver STATIC
 target_include_directories(manifold_solver PUBLIC include)
 target_link_libraries(manifold_solver PUBLIC Eigen3::Eigen)
 
+
+# ---- fluid (header-only for now) ----
+add_library(manifold_fluid INTERFACE)
+target_include_directories(manifold_fluid INTERFACE include)
+target_link_libraries(manifold_fluid INTERFACE Eigen3::Eigen)
+
+# ---- ai (header-only for now) ----
+add_library(manifold_ai INTERFACE)
+target_include_directories(manifold_ai INTERFACE include)
+target_link_libraries(manifold_ai INTERFACE Eigen3::Eigen)
+
+
 # ---- control (header-only for now) ----
 add_library(manifold_control INTERFACE)
 target_include_directories(manifold_control INTERFACE include)
