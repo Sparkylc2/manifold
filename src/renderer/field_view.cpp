@@ -110,7 +110,9 @@ void FieldView::draw_colorbar(Renderer *r) const {
     r->draw_text(buf, x - 4 - r->measure_text(buf, 11), y + h - 9, 11,
                  theme.text_dim);
     if (!m_label.empty())
-        r->draw_text_rotated(m_label, x + w + 4, y + h / 2, 12, -M_PI / 2,
+        // rotated -90 deg extends the glyphs ~font_size px to the left of the
+        // anchor, so offset past the bar by the font height to clear it
+        r->draw_text_rotated(m_label, x + w + 14, y + h / 2, 12, -M_PI / 2,
                              theme.text_dim);
 }
 

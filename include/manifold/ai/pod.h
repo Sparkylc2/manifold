@@ -41,6 +41,9 @@ class POD : public ReducedModel {
 
     VectorXd coeffs(int i) const { return m_coeffs.row(i); }
 
+    // full temporal coefficient matrix (modes x time), = Sigma V^T
+    const MatrixXd &coeff_matrix() const { return m_coeffs; }
+
     const VectorXd &mean() const { return m_mean; }
 
     const VectorXd &singular_values() const { return m_sigma; }

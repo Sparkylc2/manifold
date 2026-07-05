@@ -2,6 +2,7 @@
 
 #include <manifold/app/demo_registry.h>
 
+#include "../ae_karman_demo.h"
 #include "../aerofoil_flutter_demo.h"
 #include "../cart_pendulum_demo.h"
 #include "../crank_slider.h"
@@ -91,6 +92,11 @@ inline void populate_registry(DemoRegistry &registry) {
         "karman_pod", "Karman POD", "Fluids",
         "Live POD of the vortex street: top-6 spatial modes recomputed from a "
         "rolling snapshot window and drawn as their own flow fields");
+
+    registry.add<Demo::AEKarmanDemo>(
+        "karman_ae", "Karman Autoencoder", "Fluids",
+        "POD-reduced autoencoder trained live: untrained net reconstructs "
+        "garbage, sharpens as it trains; node-value network diagram");
 
     registry.add<Demo::AerofoilFlutterDemo>(
         "aerofoil", "Aerofoil Flutter", "Fluids",
