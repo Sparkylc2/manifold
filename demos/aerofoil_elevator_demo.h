@@ -90,6 +90,8 @@ class AerofoilElevatorDemo : public DemoBase {
     static constexpr int ELEV_CODE = 12; // NACA 0012
     static constexpr double ELEV_CHORD = 1.0;
     static constexpr double ELEV_MASS = 0.12;
+    // tail boom: hold the elevator well aft of the foil wake, on a long lever,
+    // so a small deflection has real pitch authority over the assembly
     static constexpr double HINGE_GAP = 0.9; // TE -> elevator LE clearance
 
     static constexpr double SERVO_KP = 25.0;
@@ -126,6 +128,7 @@ class AerofoilElevatorDemo : public DemoBase {
         m_foil.theta = AOA0;
         build_foil();
 
+        // pin foil TE to elevator LE, both starting aligned (zero deflection)
         m_elev.reset();
         m_elev.m = ELEV_MASS;
         m_elev.theta = AOA0;
@@ -160,6 +163,8 @@ class AerofoilElevatorDemo : public DemoBase {
         m_torsion.set_kd(TORSION_C);
         m_system.add_force_generator(&m_torsion);
 
+        // revolute hinge: foil local anchor coincides with elevator local
+        // anchor
         m_hinge.set_bodies(&m_foil, &m_elev);
         m_hinge.set_local_pos1(m_foil_anchor);
         m_hinge.set_local_pos2(m_elev_anchor);
@@ -167,6 +172,7 @@ class AerofoilElevatorDemo : public DemoBase {
         m_hinge.set_kd(12.0);
         m_system.add_constraint(&m_hinge);
 
+        // servo torque acts +on elevator, -on foil (reaction into the foil)
         m_servo.set_bodies(&m_elev, &m_foil);
         m_servo.set_gains(SERVO_KP, SERVO_KD, SERVO_TAU_MAX);
         m_system.add_force_generator(&m_servo);
@@ -216,6 +222,7 @@ class AerofoilElevatorDemo : public DemoBase {
         m_foil_force.set_wrench(Ff, tf);
         m_elev_force.set_wrench(Fe, te);
 
+        // slew the command; the servo itself closes the loop each substep
         update_command(dt);
         m_servo.set_command(m_cmd);
 
@@ -257,6 +264,7 @@ class AerofoilElevatorDemo : public DemoBase {
         if (m_mouse.active())
             Rendering::draw_spring(r, m_foil.p, m_mouse.target());
 
+        // rigid tail boom from the foil TE out to the hinge
         Vector2d te, hinge;
         m_foil.local_to_world(Vector2d(m_foil_te, 0.0), &te);
         m_foil.local_to_world(m_foil_anchor, &hinge);
@@ -336,6 +344,7 @@ class AerofoilElevatorDemo : public DemoBase {
     }
 
   private:
+    // spring-centered stick: hold to deflect, release to self-center
     void update_command(double dt) {
         if (m_key_up)
             m_cmd += CMD_RATE * dt;
@@ -396,6 +405,7 @@ class AerofoilElevatorDemo : public DemoBase {
         m_elev_anchor = Vector2d(le_x, 0.0);
     }
 
+    // put the elevator COM so its LE anchor meets the foil's hinge point
     void place_elevator() {
         Vector2d hinge;
         m_foil.local_to_world(m_foil_anchor, &hinge);
@@ -435,6 +445,7 @@ class AerofoilElevatorDemo : public DemoBase {
         }
     }
 
+    // filled + stroked polygon in a body's frame (shared by foil + elevator)
     void draw_polygon(Rendering::Renderer *r,
                       const std::vector<Vector2d> &outline, const Vector2d &pos,
                       double theta) {
