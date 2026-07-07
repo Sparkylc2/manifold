@@ -3,6 +3,7 @@
 #include <manifold/app/demo_registry.h>
 
 #include "../ae_karman_demo.h"
+#include "../aerofoil_elevator_demo.h"
 #include "../aerofoil_flutter_demo.h"
 #include "../cart_pendulum_demo.h"
 #include "../crank_slider.h"
@@ -102,6 +103,11 @@ inline void populate_registry(DemoRegistry &registry) {
         "aerofoil", "Aerofoil Flutter", "Fluids",
         "NACA aerofoil on plunge + torsional springs in a flow (penalization); "
         "drag it, watch it flutter");
+
+    registry.add<Demo::AerofoilElevatorDemo>(
+        "aerofoil_elevator", "Aerofoil + Elevator", "Fluids",
+        "Flutter foil with a hinged elevator (revolute joint); Up/Down deflect "
+        "the servo-held surface, force propagates through the hinge");
 
     registry.add<Demo::SupersonicDemo>(
         "supersonic", "Supersonic Wedge", "Fluids",
