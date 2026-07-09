@@ -17,6 +17,9 @@ class DemoBase {
     virtual void process(double dt) = 0;
     virtual void render(Rendering::Renderer *r) = 0;
 
+    // todo: add this so we can deallocate textures when closing a demo
+    // virtual void end() = 0;
+
     virtual const char *name() const = 0;
 
     virtual double default_cam_x() const;

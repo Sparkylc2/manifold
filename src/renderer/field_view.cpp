@@ -55,11 +55,11 @@ void FieldView::render(Renderer *r, double ox, double oy, double cell,
     int tlx, tly, brx, bry;
     r->world_to_screen(ox, oy + h, &tlx, &tly);
     r->world_to_screen(ox + w, oy, &brx, &bry);
-    Rectangle src{0, 0, (float)tw, (float)th};
-    Rectangle dst{(float)tlx, (float)tly, (float)(brx - tlx),
-                  (float)(bry - tly)};
-    DrawTexturePro(m_tex, src, dst, {0, 0}, 0.0f,
-                   ::Color{255, 255, 255, 255});
+    {
+        LayerScope fld(r, Layer::Field);
+        r->draw_texture(m_tex.id, tw, th, tlx, tly, brx - tlx, bry - tly,
+                        false);
+    }
 
     if (m_settings.colorbar)
         draw_colorbar(r);

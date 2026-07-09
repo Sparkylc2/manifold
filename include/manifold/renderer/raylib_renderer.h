@@ -50,6 +50,9 @@ class RaylibRenderer : public Renderer {
     void draw_arrow(double x0, double y0, double x1, double y1,
                     double thickness, Color color) override;
 
+    void draw_triangle(double x0, double y0, double x1, double y1, double x2,
+                       double y2, Color color) override;
+
     void draw_grid(double spacing, double extent, Color line_color,
                    Color axis_color) override;
 
@@ -100,7 +103,7 @@ class RaylibRenderer : public Renderer {
 
     // --- offscreen frame recording ---
     bool begin_recording(const std::string &path, int fps, int crop_x = 0,
-                          int crop_y = 0, int crop_w = 0, int crop_h = 0);
+                         int crop_y = 0, int crop_w = 0, int crop_h = 0);
     void end_recording();
     bool is_recording() const override { return m_recording; }
 
@@ -126,8 +129,6 @@ class RaylibRenderer : public Renderer {
     void draw_text_proportional(::Font font, const char *text, float x, float y,
                                 float font_size, ::Color color);
 
-    // matches draw_text_proportional's advance, so measured width == drawn
-    // width
     float measure_proportional(::Font font, const char *text, float font_size);
 
     // ---- FXAA setup ----
@@ -139,7 +140,7 @@ class RaylibRenderer : public Renderer {
     void init_smooth_line_shader();
 
     // ---- recording ----
-    void capture_frame(); // read framebuffer, write one raw RGBA frame
+    void capture_frame();
 
     // ---- state ----
     double m_cam_x, m_cam_y, m_zoom;
@@ -164,9 +165,9 @@ class RaylibRenderer : public Renderer {
     // recording
     bool m_recording = false;
     std::FILE *m_rec_pipe = nullptr;
-    int m_rec_w = 0, m_rec_h = 0;        // output (cropped) frame size
-    int m_crop_x = 0, m_crop_y = 0;      // crop origin in framebuffer px
-    int m_fb_w = 0, m_fb_h = 0;          // full framebuffer size at rec start
+    int m_rec_w = 0, m_rec_h = 0;   // output (cropped) frame size
+    int m_crop_x = 0, m_crop_y = 0; // crop origin in framebuffer px
+    int m_fb_w = 0, m_fb_h = 0;     // full framebuffer size at rec start
 };
 
 } // namespace manifold::Rendering

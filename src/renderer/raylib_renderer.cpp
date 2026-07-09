@@ -251,24 +251,49 @@ void RaylibRenderer::draw_arrow(double x0, double y0, double x1, double y1,
                  detail::to_rl(color));
 }
 
+void RaylibRenderer::draw_triangle(double x0, double y0, double x1, double y1,
+                                   double x2, double y2, Color color) {
+    const Vector2 a{w2sx(x0), w2sy(y0)}, b{w2sx(x1), w2sy(y1)},
+        c{w2sx(x2), w2sy(y2)};
+    const ::Color rc = detail::to_rl(color);
+    // both windings
+    DrawTriangle(a, b, c, rc);
+    DrawTriangle(a, c, b, rc);
+}
+
 void RaylibRenderer::draw_grid(double spacing, double extent, Color line_color,
                                Color axis_color) {
     auto lc = detail::to_rl(line_color), ac = detail::to_rl(axis_color);
     double lw, tw, rw, bw;
     screen_to_world(0, 0, &lw, &tw);
     screen_to_world(GetScreenWidth(), GetScreenHeight(), &rw, &bw);
+
+    double ax_gx, ax_gy;
+
     for (double gx = std::floor(lw / spacing) * spacing; gx <= rw;
          gx += spacing) {
         bool ax = std::abs(gx) < spacing * 0.01;
+        if (ax) {
+            ax_gx = gx;
+            continue;
+        }
         DrawLineEx({w2sx(gx), w2sy(bw)}, {w2sx(gx), w2sy(tw)}, ax ? 2.0f : 1.0f,
                    ax ? ac : lc);
     }
+
     for (double gy = std::floor(bw / spacing) * spacing; gy <= tw;
          gy += spacing) {
         bool ax = std::abs(gy) < spacing * 0.01;
+        if (ax) {
+            ax_gy = gy;
+            continue;
+        }
         DrawLineEx({w2sx(lw), w2sy(gy)}, {w2sx(rw), w2sy(gy)}, ax ? 2.0f : 1.0f,
                    ax ? ac : lc);
     }
+
+    DrawLineEx({w2sx(ax_gx), w2sy(bw)}, {w2sx(ax_gx), w2sy(tw)}, 2.0f, ac);
+    DrawLineEx({w2sx(lw), w2sy(ax_gy)}, {w2sx(rw), w2sy(ax_gy)}, 2.0f, ac);
 }
 
 // --- screen-space ---

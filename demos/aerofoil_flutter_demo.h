@@ -5,6 +5,7 @@
 #include <manifold/fluid/mac_fluid_solver.h>
 #include <manifold/fluid/solid_shapes.h>
 #include <manifold/fluid/stable_fluid_solver.h>
+#include <manifold/renderer/aero_visuals.h>
 #include <manifold/renderer/constraint_visuals.h>
 #include <manifold/renderer/demo_base.h>
 #include <manifold/renderer/field_view.h>
@@ -155,7 +156,7 @@ class AerofoilFlutterDemo : public DemoBase {
     }
 
     void render(Rendering::Renderer *r) override {
-        draw_world_grid(r);
+        draw_grid(r);
         const Vector2d o = m_fluid->origin();
         const double vmax = 2.0 * INFLOW;
 
@@ -287,72 +288,9 @@ class AerofoilFlutterDemo : public DemoBase {
         return (w - m_foil.p).norm() < CHORD * 0.7;
     }
 
-    static void draw_world_grid(Rendering::Renderer *r) {
-        double lw, tw, rw, bw;
-        r->screen_to_world(0, 0, &lw, &tw);
-        r->screen_to_world(r->screen_width(), r->screen_height(), &rw, &bw);
-        const auto lc = Rendering::palette::grid_line();
-        const auto ac = Rendering::palette::grid_axis();
-        const Color rlc{lc.r, lc.g, lc.b, lc.a}, rac{ac.r, ac.g, ac.b, ac.a};
-        const double sp = 1.0;
-        for (double gx = std::floor(lw / sp) * sp; gx <= rw; gx += sp) {
-            const bool ax = std::fabs(gx) < sp * 0.01;
-            int x0, y0, x1, y1;
-            r->world_to_screen(gx, bw, &x0, &y0);
-            r->world_to_screen(gx, tw, &x1, &y1);
-            DrawLineEx({(float)x0, (float)y0}, {(float)x1, (float)y1},
-                       ax ? 2.0f : 1.0f, ax ? rac : rlc);
-        }
-        for (double gy = std::floor(bw / sp) * sp; gy <= tw; gy += sp) {
-            const bool ax = std::fabs(gy) < sp * 0.01;
-            int x0, y0, x1, y1;
-            r->world_to_screen(lw, gy, &x0, &y0);
-            r->world_to_screen(rw, gy, &x1, &y1);
-            DrawLineEx({(float)x0, (float)y0}, {(float)x1, (float)y1},
-                       ax ? 2.0f : 1.0f, ax ? rac : rlc);
-        }
-    }
-
     void draw_foil(Rendering::Renderer *r) {
-        const size_t n = m_outline.size();
-        if (n < 3)
-            return;
-        const double c = std::cos(m_foil.theta), s = std::sin(m_foil.theta);
-
-        std::vector<Vector2d> world(n);
-        std::vector<Vector2> scr(n);
-        Vector2 centre{0.0f, 0.0f};
-        for (size_t i = 0; i < n; i++) {
-            const Vector2d &a = m_outline[i];
-            world[i] = m_foil.p +
-                       Vector2d(c * a.x() - s * a.y(), s * a.x() + c * a.y());
-            int sx, sy;
-            r->world_to_screen(world[i].x(), world[i].y(), &sx, &sy);
-            scr[i] = Vector2{(float)sx, (float)sy};
-            centre.x += scr[i].x;
-            centre.y += scr[i].y;
-        }
-        centre.x /= (float)n;
-        centre.y /= (float)n;
-
         const Rendering::Color fg = Rendering::palette::background();
-        const Color fill{(unsigned char)(fg.r), (unsigned char)(fg.g),
-                         (unsigned char)(fg.b), 255};
-        for (size_t i = 0; i < n; i++) {
-            const Vector2 a = scr[i], b = scr[(i + 1) % n];
-            DrawTriangle(centre, a, b, fill);
-            DrawTriangle(centre, b, a, fill);
-        }
-
-        // the fan triangles get sub-pixel thin at the sharp trailing edge and
-        // miss pixels there; stroke the perimeter in the fill colour to plug
-        // those gaps before the outline goes on top
-        for (size_t i = 0; i < n; i++)
-            DrawLineEx(scr[i], scr[(i + 1) % n], 2.5f, fill);
-
-        for (size_t i = 0; i < n; i++)
-            r->draw_line(world[i].x(), world[i].y(), world[(i + 1) % n].x(),
-                         world[(i + 1) % n].y(), 2.0f, fg);
+        Rendering::draw_aerofoil(r, m_outline, m_foil.p, m_foil.theta, fg, fg);
     }
 
     Fluid::StableFluidSolver m_stam{

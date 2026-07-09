@@ -94,6 +94,13 @@ void LayeredRenderer::draw_arrow(double x0, double y0, double x1, double y1,
          line_cmd(Op::Arrow, x0, y0, x1, y1, thickness, color));
 }
 
+void LayeredRenderer::draw_triangle(double x0, double y0, double x1, double y1,
+                                    double x2, double y2, Color color) {
+    Cmd c{Op::Tri};
+    c.a = x0, c.b = y0, c.c = x1, c.d = y1, c.e = x2, c.f = y2, c.col = color;
+    push(resolve(Layer::Content), c);
+}
+
 void LayeredRenderer::draw_grid(double spacing, double extent, Color line_color,
                                 Color axis_color) {
     Cmd c{Op::Grid};
@@ -258,6 +265,9 @@ void LayeredRenderer::execute(const Cmd &c) {
         break;
     case Op::Arrow:
         m_inner->draw_arrow(c.a, c.b, c.c, c.d, c.e, c.col);
+        break;
+    case Op::Tri:
+        m_inner->draw_triangle(c.a, c.b, c.c, c.d, c.e, c.f, c.col);
         break;
     case Op::Grid:
         m_inner->draw_grid(c.a, c.b, c.col, c.col2);

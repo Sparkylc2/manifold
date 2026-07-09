@@ -1,10 +1,12 @@
 #pragma once
 
+#include <manifold/control/elevator_servo.h>
 #include <manifold/coupling/fluid_wrench_force.h>
 #include <manifold/coupling/rigid_body_boundary.h>
 #include <manifold/fluid/mac_fluid_solver.h>
 #include <manifold/fluid/solid_shapes.h>
 #include <manifold/fluid/stable_fluid_solver.h>
+#include <manifold/renderer/aero_visuals.h>
 #include <manifold/renderer/constraint_visuals.h>
 #include <manifold/renderer/demo_base.h>
 #include <manifold/renderer/field_view.h>
@@ -28,41 +30,6 @@ namespace manifold::Demo {
 
 using Vector2d = Eigen::Vector2d;
 
-class ElevatorServo : public Solver::ForceGenerator {
-  public:
-    void set_bodies(Solver::RigidBody *elev, Solver::RigidBody *foil) {
-        m_elev = elev;
-        m_foil = foil;
-    }
-    void set_gains(double kp, double kd, double tau_max) {
-        m_kp = kp;
-        m_kd = kd;
-        m_tau_max = tau_max;
-    }
-    void set_command(double cmd) { m_cmd = cmd; }
-    double torque() const { return m_tau; }
-
-    void apply(Solver::SystemState *state) override {
-        if (!m_elev || !m_foil)
-            return;
-        const int e = m_elev->index, f = m_foil->index;
-        if (e < 0 || f < 0)
-            return;
-
-        const double defl = state->theta[e] - state->theta[f];
-        const double rate = state->v_theta[e] - state->v_theta[f];
-        m_tau = std::clamp(m_kp * (m_cmd - defl) - m_kd * rate, -m_tau_max,
-                           m_tau_max);
-        state->t[e] += m_tau;
-        state->t[f] -= m_tau;
-    }
-
-  private:
-    Solver::RigidBody *m_elev = nullptr;
-    Solver::RigidBody *m_foil = nullptr;
-    double m_kp = 20.0, m_kd = 1.5, m_tau_max = 40.0;
-    double m_cmd = 0.0, m_tau = 0.0;
-};
 class AerofoilElevatorDemo : public DemoBase {
   public:
     static constexpr int COLS = 250;
@@ -230,7 +197,7 @@ class AerofoilElevatorDemo : public DemoBase {
     }
 
     void render(Rendering::Renderer *r) override {
-        draw_world_grid(r);
+        draw_grid(r);
         const Vector2d o = m_fluid->origin();
         const double vmax = 2.0 * INFLOW;
 
@@ -271,8 +238,11 @@ class AerofoilElevatorDemo : public DemoBase {
         r->draw_line(te.x(), te.y(), hinge.x(), hinge.y(), 3.0f,
                      Rendering::palette::text_dim());
 
-        draw_polygon(r, m_foil_outline, m_foil.p, m_foil.theta);
-        draw_polygon(r, m_elev_outline, m_elev.p, m_elev.theta);
+        const Rendering::Color fg = Rendering::palette::background();
+        Rendering::draw_aerofoil(r, m_foil_outline, m_foil.p, m_foil.theta, fg,
+                                 fg);
+        Rendering::draw_aerofoil(r, m_elev_outline, m_elev.p, m_elev.theta, fg,
+                                 fg);
         Rendering::draw_pin_joint(r, hinge, 0.06);
 
         const double cl = 2.0 * m_last_F.y() / (INFLOW * INFLOW * CHORD);
@@ -419,72 +389,6 @@ class AerofoilElevatorDemo : public DemoBase {
         return (w - m_foil.p).norm() < CHORD * 0.7;
     }
 
-    static void draw_world_grid(Rendering::Renderer *r) {
-        double lw, tw, rw, bw;
-        r->screen_to_world(0, 0, &lw, &tw);
-        r->screen_to_world(r->screen_width(), r->screen_height(), &rw, &bw);
-        const auto lc = Rendering::palette::grid_line();
-        const auto ac = Rendering::palette::grid_axis();
-        const Color rlc{lc.r, lc.g, lc.b, lc.a}, rac{ac.r, ac.g, ac.b, ac.a};
-        const double sp = 1.0;
-        for (double gx = std::floor(lw / sp) * sp; gx <= rw; gx += sp) {
-            const bool ax = std::fabs(gx) < sp * 0.01;
-            int x0, y0, x1, y1;
-            r->world_to_screen(gx, bw, &x0, &y0);
-            r->world_to_screen(gx, tw, &x1, &y1);
-            DrawLineEx({(float)x0, (float)y0}, {(float)x1, (float)y1},
-                       ax ? 2.0f : 1.0f, ax ? rac : rlc);
-        }
-        for (double gy = std::floor(bw / sp) * sp; gy <= tw; gy += sp) {
-            const bool ax = std::fabs(gy) < sp * 0.01;
-            int x0, y0, x1, y1;
-            r->world_to_screen(lw, gy, &x0, &y0);
-            r->world_to_screen(rw, gy, &x1, &y1);
-            DrawLineEx({(float)x0, (float)y0}, {(float)x1, (float)y1},
-                       ax ? 2.0f : 1.0f, ax ? rac : rlc);
-        }
-    }
-
-    // filled + stroked polygon in a body's frame (shared by foil + elevator)
-    void draw_polygon(Rendering::Renderer *r,
-                      const std::vector<Vector2d> &outline, const Vector2d &pos,
-                      double theta) {
-        const size_t n = outline.size();
-        if (n < 3)
-            return;
-        const double c = std::cos(theta), s = std::sin(theta);
-
-        std::vector<Vector2d> world(n);
-        std::vector<Vector2> scr(n);
-        Vector2 centre{0.0f, 0.0f};
-        for (size_t i = 0; i < n; i++) {
-            const Vector2d &a = outline[i];
-            world[i] =
-                pos + Vector2d(c * a.x() - s * a.y(), s * a.x() + c * a.y());
-            int sx, sy;
-            r->world_to_screen(world[i].x(), world[i].y(), &sx, &sy);
-            scr[i] = Vector2{(float)sx, (float)sy};
-            centre.x += scr[i].x;
-            centre.y += scr[i].y;
-        }
-        centre.x /= (float)n;
-        centre.y /= (float)n;
-
-        const Rendering::Color fg = Rendering::palette::background();
-        const Color fill{(unsigned char)(fg.r), (unsigned char)(fg.g),
-                         (unsigned char)(fg.b), 255};
-        for (size_t i = 0; i < n; i++) {
-            const Vector2 a = scr[i], b = scr[(i + 1) % n];
-            DrawTriangle(centre, a, b, fill);
-            DrawTriangle(centre, b, a, fill);
-        }
-        for (size_t i = 0; i < n; i++)
-            DrawLineEx(scr[i], scr[(i + 1) % n], 2.5f, fill);
-        for (size_t i = 0; i < n; i++)
-            r->draw_line(world[i].x(), world[i].y(), world[(i + 1) % n].x(),
-                         world[(i + 1) % n].y(), 2.0f, fg);
-    }
-
     Fluid::StableFluidSolver m_stam{
         (unsigned)ROWS, (unsigned)COLS,
         CELL,           /*visc*/ 0.0,
@@ -504,7 +408,7 @@ class AerofoilElevatorDemo : public DemoBase {
     Solver::Spring m_spring_x, m_spring_y;
     Solver::TorsionSpring m_torsion;
     Solver::LinkConstraint m_hinge;
-    ElevatorServo m_servo;
+    Control::ElevatorServo m_servo;
     Solver::MouseSpringForceGenerator m_mouse;
 
     Coupling::FluidWrenchForce m_foil_force{&m_foil};

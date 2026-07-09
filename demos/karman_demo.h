@@ -4,9 +4,6 @@
 #include <manifold/renderer/demo_base.h>
 #include <manifold/renderer/field_view.h>
 
-#include <algorithm>
-#include <cmath>
-
 namespace manifold::Demo {
 
 using Vector2d = Eigen::Vector2d;
@@ -43,14 +40,13 @@ class KarmanDemo : public DemoBase {
     void render(Rendering::Renderer *r) override {
         const Vector2d o = m_fluid.origin();
         const double vmax = 2.0 * INFLOW; // colormap range
-        m_field.render(r, o.x(), o.y(), CELL,
-                       [this, vmax](double wx, double wy, double &val,
-                                    double &a) {
-                           val = m_fluid.speed_at(Vector2d(wx, wy),
-                                                  Fluid::Interp::Cubic) /
-                                 vmax;
-                           a = 1.0;
-                       });
+        m_field.render(
+            r, o.x(), o.y(), CELL,
+            [this, vmax](double wx, double wy, double &val, double &a) {
+                val = m_fluid.speed_at(Vector2d(wx, wy), Fluid::Interp::Cubic) /
+                      vmax;
+                a = 1.0;
+            });
 
         // obstacle outline (recorded -> on top)
         r->draw_circle(m_center.x(), m_center.y(), RADIUS,

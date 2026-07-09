@@ -25,9 +25,9 @@
 #include "../radial_engine_demo.h"
 #include "../solar_system_demo.h"
 #include "../spring_demo.h"
+#include "../string_art.h"
 #include "../supersonic_demo.h"
 #include "../truss_demo.h"
-#include "../turbofan_demo.h"
 #include "../wave_demo.h"
 
 namespace manifold::App {
@@ -123,11 +123,6 @@ inline void populate_registry(DemoRegistry &registry) {
         "flutter", "Cylinder Flutter", "Fluids",
         "Two-way coupled cylinder on springs in a flow; drag it or add dye");
 
-    registry.add<Demo::TurbofanDemo>(
-        "turbofan", "Turbofan", "Propulsion",
-        "Two-spool turbofan cutaway: 3D MAC solver with actuator-disk blade "
-        "rows, 0D cycle model driving the station Tt/Pt bars (not realtime)");
-
     registry.add<Demo::PDEDemo>(
         "pde", "Poisson", "PDE",
         "Steady Poisson solve (5-point Laplacian, Dirichlet BCs); dipole "
@@ -142,6 +137,10 @@ inline void populate_registry(DemoRegistry &registry) {
         "wave", "Wave Drum", "PDE",
         "Wave equation on a circular drum (Bessel modes); gridded 3D surface, "
         "[space] to pluck");
+
+    registry.add<Demo::StringArt>("string", "String Art", "Misc",
+                                  "Draws an image using strings on a board"
+                                  "todo: add image upload");
 
     registry.add<Demo::InfoDemo>(
         "info", "manifold — Showcase", "Sandbox",

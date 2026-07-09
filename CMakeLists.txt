@@ -58,10 +58,17 @@ add_library(manifold_fluid INTERFACE)
 target_include_directories(manifold_fluid INTERFACE include)
 target_link_libraries(manifold_fluid INTERFACE Eigen3::Eigen)
 
-# ---- ai (header-only for now) ----
-add_library(manifold_ai INTERFACE)
-target_include_directories(manifold_ai INTERFACE include)
-target_link_libraries(manifold_ai INTERFACE Eigen3::Eigen)
+# ---- ai ----
+add_library(manifold_ai STATIC
+    src/ai/autoencoder.cpp
+    src/ai/history.cpp
+    src/ai/io.cpp
+    src/ai/pod.cpp
+    src/ai/snapshot_recorder.cpp
+    src/ai/svd.cpp
+)
+target_include_directories(manifold_ai PUBLIC include)
+target_link_libraries(manifold_ai PUBLIC Eigen3::Eigen)
 
 
 # ---- control (header-only for now) ----
@@ -81,6 +88,7 @@ add_library(manifold_renderer STATIC
     src/renderer/hud_panel.cpp
     src/renderer/scene3d.cpp
     src/renderer/field_view.cpp
+    src/renderer/texture_view.cpp
     src/renderer/demo_base.cpp
     src/renderer/body_visuals.cpp
     src/renderer/plot_widget.cpp

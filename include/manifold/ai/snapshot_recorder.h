@@ -16,57 +16,10 @@ class SnapshotRecorder {
     }
 
     // gates wether recording is captured or not
-    void maybe_capture(const Fluid::FluidSolver &f, double t) {
-
-        // make sure fluid is fully developed
-        if (t <= m_t_transient) {
-            return;
-        }
-
-        if (m_step_count % m_stride == 0) {
-            VectorXd state = sample_state(f);
-            m_history.push(state);
-            m_step_count = 0;
-        }
-
-        m_step_count++;
-    }
+    void maybe_capture(const Fluid::FluidSolver &f, double t);
 
     // stacks [u; v] sampled at cell centres into one state vector
-    VectorXd sample_state(const Fluid::FluidSolver &f) const {
-
-        VectorXd state = VectorXd(2 * m_nx * m_ny);
-
-        const int nc = m_nx * m_ny;
-        // iterate over every cell to stack the u and v values as a vector
-        for (int j = 0; j < m_ny; j++) {
-            for (int i = 0; i < m_nx; i++) {
-
-                const int c = i + j * m_nx;
-                // get the world pos
-                const Vector2d p =
-                    m_origin + Vector2d((i + 0.5) * m_cell, (j + 0.5) * m_cell);
-
-                int ci, cj;
-                if (!f.world_to_cell(p, &ci, &cj)) { // outside the domain
-                    state[c] = 0.0;
-                    state[nc + c] = 0.0;
-                    continue;
-                }
-
-                // sample velocity
-                Vector2d v;
-                f.velocity_at(p, &v);
-
-                // add to state vector
-                // u and v are grouped so it's indexed as such
-                state[i + j * m_nx] = v.x();
-                state[m_nx * m_ny + i + j * m_nx] = v.y();
-            }
-        }
-
-        return state;
-    }
+    VectorXd sample_state(const Fluid::FluidSolver &f) const;
 
     // getters
     const History &history() const { return m_history; }

@@ -23,7 +23,7 @@ constexpr int Right = 1;
 constexpr int Middle = 2;
 } // namespace mouse
 
-enum class Layer { Grid, Shadow, Content, Text, UI, Count, Auto };
+enum class Layer { Grid, Field, Shadow, Content, Text, UI, Count, Auto };
 
 struct RendererConfig {
     int width = 1280;
@@ -62,6 +62,8 @@ class Renderer {
                            double theta = 0.0) = 0;
     virtual void draw_arrow(double x0, double y0, double x1, double y1,
                             double thickness, Color color) = 0;
+    virtual void draw_triangle(double x0, double y0, double x1, double y1,
+                               double x2, double y2, Color color) = 0;
     virtual void draw_grid(double spacing, double extent, Color line_color,
                            Color axis_color) = 0;
 
