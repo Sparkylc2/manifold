@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 project(manifold LANGUAGES C CXX)
+add_compile_options($<$<CONFIG:Release>:-march=native>)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -61,6 +62,10 @@ target_link_libraries(manifold_fluid INTERFACE Eigen3::Eigen)
 # ---- ai ----
 add_library(manifold_ai STATIC
     src/ai/autoencoder.cpp
+    src/ai/dense_layer.cpp
+    src/ai/conv_layer.cpp
+    src/ai/conv_autoencoder.cpp
+    src/ai/layer.cpp
     src/ai/history.cpp
     src/ai/io.cpp
     src/ai/pod.cpp
@@ -89,6 +94,7 @@ add_library(manifold_renderer STATIC
     src/renderer/scene3d.cpp
     src/renderer/field_view.cpp
     src/renderer/texture_view.cpp
+    src/renderer/equation_cache.cpp
     src/renderer/demo_base.cpp
     src/renderer/body_visuals.cpp
     src/renderer/plot_widget.cpp

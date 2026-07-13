@@ -73,7 +73,7 @@ class AEKarmanDemo : public DemoBase {
         m_fluid.set_circle_obstacle(m_center, RADIUS);
 
         m_recorder =
-            AI::SnapshotRecorder(COLS, ROWS, CELL, o, STRIDE, TRANSIENT, N_CAP);
+            AI::SnapshotRecorder(COLS, ROWS, CELL, o, STRIDE, N_CAP, TRANSIENT);
         m_pod_ready = m_ae_built = m_training = false;
         m_want_refit = true;
         m_D = 0;
@@ -382,8 +382,8 @@ class AEKarmanDemo : public DemoBase {
     Rendering::FieldView m_field, m_recon_field;
     Rendering::PlotWidget m_loss_plot;
 
-    AI::SnapshotRecorder m_recorder{COLS,   ROWS,      CELL, Vector2d(OX, OY),
-                                    STRIDE, TRANSIENT, N_CAP};
+    AI::SnapshotRecorder m_recorder{COLS,   ROWS,  CELL,     Vector2d(OX, OY),
+                                    STRIDE, N_CAP, TRANSIENT};
     AI::POD m_pod;
     AI::Autoencoder m_ae;
     AI::Autoencoder::TrainConfig m_cfg{32, 1e-2};

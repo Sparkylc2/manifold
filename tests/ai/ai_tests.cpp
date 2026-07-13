@@ -32,12 +32,10 @@ static bool check_svd(const SVDResult &r, const MatrixXd &A, const char *tag) {
 int main() {
     bool ok = true;
 
-    // 1. both SVDs vs Eigen oracle on a random tall matrix
     const MatrixXd A = MatrixXd::Random(40, 12);
     ok &= check_svd(jacobi_svd(A), A, "jacobi");
     ok &= check_svd(eigen_svd(A), A, "eigen ");
 
-    // 2. POD: build a low-rank field + mean, check reconstruction + energy
     const int M = 500, N = 60, r = 3;
     const VectorXd mean = VectorXd::Random(M);
     const MatrixXd modes = MatrixXd::Random(M, r);
@@ -49,18 +47,17 @@ int main() {
 
     double recon = 0.0;
     for (int t = 0; t < N; t++)
-        recon = std::max(
-            recon, (pod.reconstruct(X.col(t), pod.num_modes()) - X.col(t))
-                       .cwiseAbs()
-                       .maxCoeff());
-    const double e_r = pod.cumulative_energy(r);      // rank-3 should be ~all
+        recon = std::max(recon,
+                         (pod.reconstruct(X.col(t), pod.num_modes()) - X.col(t))
+                             .cwiseAbs()
+                             .maxCoeff());
+    const double e_r = pod.cumulative_energy(r);
     const double e_all = pod.cumulative_energy(pod.num_modes());
 
     std::printf("[pod   ] recon=%.2e  E(3)=%.6f  E(all)=%.6f\n", recon, e_r,
                 e_all);
     ok &= recon < 1e-9 && e_r > 0.999999 && std::abs(e_all - 1.0) < 1e-9;
 
-    // 3. timing of the fast path at demo scale (40k x 120)
     const MatrixXd big = MatrixXd::Random(40000, 120);
     const auto t0 = std::chrono::high_resolution_clock::now();
     const SVDResult bs = eigen_svd(big);

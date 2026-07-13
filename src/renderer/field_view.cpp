@@ -55,6 +55,8 @@ void FieldView::render(Renderer *r, double ox, double oy, double cell,
     int tlx, tly, brx, bry;
     r->world_to_screen(ox, oy + h, &tlx, &tly);
     r->world_to_screen(ox + w, oy, &brx, &bry);
+    // route through the layer pipeline so the field paints under content (and
+    // over the grid) regardless of demo call order
     {
         LayerScope fld(r, Layer::Field);
         r->draw_texture(m_tex.id, tw, th, tlx, tly, brx - tlx, bry - tly,
@@ -121,13 +123,6 @@ void FieldView::release() {
         UnloadTexture(m_tex);
     m_tex = {};
     m_pixels.clear();
-}
-
-Color color_lerp(Color a, Color b, double f) {
-    return {(unsigned char)(a.r + f * ((double)b.r - a.r)),
-            (unsigned char)(a.g + f * ((double)b.g - a.g)),
-            (unsigned char)(a.b + f * ((double)b.b - a.b)),
-            (unsigned char)(a.a + f * ((double)b.a - a.a))};
 }
 
 Colormap speed_ramp() {

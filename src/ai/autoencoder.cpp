@@ -9,87 +9,6 @@
 namespace manifold::AI {
 using namespace Eigen;
 
-// ---- Dense ----
-
-void Dense::init(int in, int out, Act a, std::mt19937 &rng) {
-    act = a;
-    W.resize(out, in);
-    b = VectorXd::Zero(out);
-
-    mW = vW = MatrixXd::Zero(out, in);
-    mb = vb = VectorXd::Zero(out);
-
-    // He for ReLU, Xavier otherwise; keeps signal variance stable
-    const double s =
-        (a == Act::ReLU) ? std::sqrt(2.0 / in) : std::sqrt(1.0 / in);
-    Utils::randn(W, s, rng);
-}
-
-MatrixXd Dense::forward(const MatrixXd &X) {
-    x_cache = X;
-    z_cache = (W * X).colwise() + b;
-    return sigma(z_cache, act);
-}
-
-MatrixXd Dense::infer(const MatrixXd &X) const {
-    return sigma((W * X).colwise() + b, act);
-}
-
-MatrixXd Dense::backward(const MatrixXd &dA) {
-    MatrixXd dZ = dA.array() * sigma_grad(z_cache, act).array();
-    gW = dZ * x_cache.transpose(); // (out,in), summed over the batch
-    gb = dZ.rowwise().sum();       // (out)
-    return W.transpose() * dZ;     // dX (in,B) -> previous layer
-}
-
-void Dense::adam_step(double lr, int t) {
-    constexpr double b1 = 0.9;
-    constexpr double b2 = 0.999;
-    constexpr double eps = 1e-8;
-
-    mW = b1 * mW.array() + (1 - b1) * gW.array();
-    vW = b2 * vW.array() + (1 - b2) * gW.array().square();
-    MatrixXd mW_h = mW.array() / (1 - std::pow(b1, t));
-    MatrixXd vW_h = vW.array() / (1 - std::pow(b2, t));
-    W -= (lr * mW_h.array() / (vW_h.array().sqrt() + eps)).matrix();
-
-    mb = b1 * mb.array() + (1 - b1) * gb.array();
-    vb = b2 * vb.array() + (1 - b2) * gb.array().square();
-    VectorXd mb_h = mb.array() / (1 - std::pow(b1, t));
-    VectorXd vb_h = vb.array() / (1 - std::pow(b2, t));
-    b -= (lr * mb_h.array() / (vb_h.array().sqrt() + eps)).matrix();
-}
-
-MatrixXd Dense::sigma(const MatrixXd &z, Act a) {
-    switch (a) {
-    case Act::Linear:
-        return z;
-    case Act::Tanh:
-        return z.array().tanh();
-    case Act::ReLU:
-        return z.cwiseMax(0.0);
-    }
-    assert(false && "invalid activation");
-    return z;
-}
-
-MatrixXd Dense::sigma_grad(const MatrixXd &z, Act a) {
-    switch (a) {
-    case Act::Linear:
-        return MatrixXd::Ones(z.rows(), z.cols());
-    case Act::Tanh: {
-        MatrixXd t = z.array().tanh();
-        return (1.0 - t.array().square()).matrix();
-    }
-    case Act::ReLU:
-        return (z.array() > 0.0).cast<double>().matrix();
-    }
-    assert(false && "invalid activation");
-    return z;
-}
-
-// ---- Autoencoder ----
-
 void Autoencoder::build(int D, const std::vector<int> &hidden, int latent,
                         uint32_t seed) {
     std::mt19937 rng(seed ? seed : std::random_device{}());
@@ -98,7 +17,7 @@ void Autoencoder::build(int D, const std::vector<int> &hidden, int latent,
     m_latent = latent;
     m_step = 0;
 
-    auto add = [&](std::vector<Dense> &stack, int in, int out, Act a) {
+    auto add = [&](std::vector<DenseLayer> &stack, int in, int out, Act a) {
         stack.emplace_back();
         stack.back().init(in, out, a, rng);
     };
@@ -161,14 +80,14 @@ double Autoencoder::fit(const MatrixXd &X, int epochs, TrainConfig cfg) {
 
 VectorXd Autoencoder::encode(const VectorXd &x) const {
     MatrixXd h = (x - m_mu).cwiseQuotient(m_sd);
-    for (const Dense &L : m_enc)
+    for (const DenseLayer &L : m_enc)
         h = L.infer(h);
     return h.col(0);
 }
 
 VectorXd Autoencoder::decode(const VectorXd &z) const {
     MatrixXd h = z;
-    for (const Dense &L : m_dec)
+    for (const DenseLayer &L : m_dec)
         h = L.infer(h);
     return h.col(0).cwiseProduct(m_sd) + m_mu;
 }
@@ -177,11 +96,11 @@ std::vector<VectorXd> Autoencoder::activations(const VectorXd &x) const {
     std::vector<VectorXd> a;
     MatrixXd h = (x - m_mu).cwiseQuotient(m_sd);
     a.push_back(h.col(0));
-    for (const Dense &L : m_enc) {
+    for (const DenseLayer &L : m_enc) {
         h = L.infer(h);
         a.push_back(h.col(0));
     }
-    for (const Dense &L : m_dec) {
+    for (const DenseLayer &L : m_dec) {
         h = L.infer(h);
         a.push_back(h.col(0));
     }
@@ -201,10 +120,10 @@ double Autoencoder::train_step(const MatrixXd &T, double lr) {
 
     // forward (caching)
     MatrixXd h = T;
-    for (Dense &L : m_enc)
+    for (DenseLayer &L : m_enc)
         h = L.forward(h);
     MatrixXd R = h;
-    for (Dense &L : m_dec)
+    for (DenseLayer &L : m_dec)
         R = L.forward(R);
 
     // L = ||R - T||^2 / 2B
@@ -220,9 +139,9 @@ double Autoencoder::train_step(const MatrixXd &T, double lr) {
 
     // update after all grads computed
     m_step++;
-    for (Dense &L : m_enc)
+    for (DenseLayer &L : m_enc)
         L.adam_step(lr, m_step);
-    for (Dense &L : m_dec)
+    for (DenseLayer &L : m_dec)
         L.adam_step(lr, m_step);
 
     return loss;

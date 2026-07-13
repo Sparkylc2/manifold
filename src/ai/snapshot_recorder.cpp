@@ -5,13 +5,16 @@ using namespace Eigen;
 
 void SnapshotRecorder::maybe_capture(const Fluid::FluidSolver &f, double t) {
 
-    // make sure fluid is fully developed
-    if (t <= m_t_transient) {
+    // make sure fluid is fully developed (-1.0 for default to skip this if not
+    // supplied)
+    if (t <= m_t_transient && t != -1.0) {
         return;
     }
 
     if (m_step_count % m_stride == 0) {
-        VectorXd state = sample_state(f);
+        // custom sampler if one is set, else the built-in [u; v] default
+        VectorXd state =
+            m_sample_func ? m_sample_func(f, *this) : sample_state(f);
         m_history.push(state);
         m_step_count = 0;
     }
@@ -53,5 +56,7 @@ VectorXd SnapshotRecorder::sample_state(const Fluid::FluidSolver &f) const {
 
     return state;
 }
+
+void SnapshotRecorder::set_sample_func(const SampleFunc &f) { m_sample_func = f; }
 
 } // namespace manifold::AI

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <manifold/renderer/interpolation.h>
 #include <manifold/renderer/renderer.h>
 
 #include "raylib.h"
@@ -67,8 +68,6 @@ class FieldView {
     Texture2D m_tex{};
     std::vector<::Color> m_pixels; // raylib pixels (RGBA8)
 };
-
-Color color_lerp(Color a, Color b, double f);
 
 Colormap speed_ramp();
 

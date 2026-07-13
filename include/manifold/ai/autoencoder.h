@@ -1,5 +1,6 @@
 #pragma once
 #include <Eigen/Core>
+#include <manifold/ai/dense_layer.h>
 #include <manifold/ai/reduced_model.h>
 
 #include <random>
@@ -8,42 +9,6 @@
 namespace manifold::AI {
 
 using namespace Eigen;
-
-enum class Act { Tanh, ReLU, Linear };
-
-struct Dense {  // one fully-connected layer: a = sigma(Wx + b)
-    MatrixXd W; // (out, in)
-    VectorXd b; // (out)
-    Act act = Act::Tanh;
-
-    // forward caches (per batch, for backprop)
-    // input (in,B), pre-activation (out,B)
-    MatrixXd x_cache, z_cache;
-
-    // gradients
-    MatrixXd gW;
-    VectorXd gb;
-
-    // Adam state
-    MatrixXd mW, vW;
-    VectorXd mb, vb;
-
-    void init(int in, int out, Act a, std::mt19937 &rng);
-
-    // caches what backprop needs and computes forward pass
-    MatrixXd forward(const MatrixXd &X);
-
-    // const inference version for the reduced model interface (no caching)
-    MatrixXd infer(const MatrixXd &X) const;
-
-    // dA = dL/dA (out,B) -> returns dX (in,B), fills gW/gb
-    MatrixXd backward(const MatrixXd &dA);
-
-    void adam_step(double lr, int t);
-
-    static MatrixXd sigma(const MatrixXd &z, Act a);
-    static MatrixXd sigma_grad(const MatrixXd &z, Act a);
-};
 
 class Autoencoder : public ReducedModel {
   public:
@@ -75,13 +40,20 @@ class Autoencoder : public ReducedModel {
     // [ normalized input, encoder activations..., decoder activations... ]
     std::vector<VectorXd> activations(const VectorXd &x) const;
 
+    MatrixXd encode(const MatrixXd &X) const override {
+        return MatrixXd::Zero(1, 1);
+    }
+    MatrixXd decode(const MatrixXd &X) const override {
+        return MatrixXd::Zero(1, 1);
+    }
+
   private:
     void fit_normalizer(const MatrixXd &X);
 
     // one gradient step on a normalized batch T (D x B)
     double train_step(const MatrixXd &T, double lr);
 
-    std::vector<Dense> m_enc, m_dec;
+    std::vector<DenseLayer> m_enc, m_dec;
     VectorXd m_mu, m_sd; // input normalization
     int m_latent = 0;
     int m_step = 0;

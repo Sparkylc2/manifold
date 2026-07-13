@@ -82,7 +82,7 @@ class PODKarmanDemo : public DemoBase {
         m_fluid.set_circle_obstacle(m_center, RADIUS);
 
         m_recorder =
-            AI::SnapshotRecorder(COLS, ROWS, CELL, o, STRIDE, TRANSIENT, N_CAP);
+            AI::SnapshotRecorder(COLS, ROWS, CELL, o, STRIDE, N_CAP, TRANSIENT);
         m_have_pod = false;
         m_num_shown = 0;
         m_rank = 4;
@@ -349,8 +349,8 @@ class PODKarmanDemo : public DemoBase {
     Rendering::FieldView m_recon_field;
     Rendering::PlotWidget m_ke_plot;
 
-    AI::SnapshotRecorder m_recorder{COLS,   ROWS,      CELL, Vector2d(OX, OY),
-                                    STRIDE, TRANSIENT, N_CAP};
+    AI::SnapshotRecorder m_recorder{COLS,   ROWS,  CELL,     Vector2d(OX, OY),
+                                    STRIDE, N_CAP, TRANSIENT};
     AI::POD m_pod;
     std::array<Rendering::FieldView, N_MODES> m_mode_views;
     std::array<VectorXd, N_MODES> m_mode_data;

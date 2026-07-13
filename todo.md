@@ -16,3 +16,4 @@ ideas:
 - a pendulum kick-up demo
 - simulating circuits
 - see if we could technically build a clock
+- add beam bending or some 2d finite element method

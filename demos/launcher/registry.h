@@ -5,6 +5,8 @@
 #include "../ae_karman_demo.h"
 #include "../aerofoil_elevator_demo.h"
 #include "../aerofoil_flutter_demo.h"
+#include "../cae2_karman_demo.h"
+#include "../cae_karman_demo.h"
 #include "../cart_pendulum_demo.h"
 #include "../crank_slider.h"
 #include "../cube_demo.h"
@@ -98,6 +100,16 @@ inline void populate_registry(DemoRegistry &registry) {
         "karman_ae", "Karman Autoencoder", "Fluids",
         "POD-reduced autoencoder trained live: untrained net reconstructs "
         "garbage, sharpens as it trains; node-value network diagram");
+
+    registry.add<Demo::CAEKarmanDemo>(
+        "karman_cae", "Karman CAE", "Fluids",
+        "POD-reduced autoencoder trained live: untrained net reconstructs "
+        "garbage, sharpens as it trains; node-value network diagram");
+
+    registry.add<Demo::CAE2KarmanDemo>(
+        "karman_cae2", "Karman CAE (conv)", "Fluids",
+        "Convolutional autoencoder trained live on a background thread: "
+        "reconstructs a coarse velocity field, sharpening as it learns");
 
     registry.add<Demo::AerofoilFlutterDemo>(
         "aerofoil", "Aerofoil Flutter", "Fluids",

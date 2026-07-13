@@ -36,6 +36,7 @@ struct Field2D {
     void zero() { fill(0.0); }
 
     void swap(Field2D &o) {
+
         m_data.swap(o.m_data);
         std::swap(m_W, o.m_W);
         std::swap(m_H, o.m_H);

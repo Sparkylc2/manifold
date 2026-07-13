@@ -33,6 +33,13 @@ class POD : public ReducedModel {
     VectorXd decode(const VectorXd &z) const override;
     int latent_dim() const override { return m_rank; }
 
+    MatrixXd encode(const MatrixXd &X) const override {
+        return MatrixXd::Zero(1, 1);
+    }
+    MatrixXd decode(const MatrixXd &X) const override {
+        return MatrixXd::Zero(1, 1);
+    }
+
   private:
     VectorXd m_mean;
     MatrixXd m_modes;  // U
