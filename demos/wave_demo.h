@@ -22,9 +22,9 @@ namespace manifold::Demo {
 // height surface. seeded with the fundamental Bessel mode; [space] adds plucks.
 class WaveDemo : public DemoBase {
   public:
-    static constexpr int N = 72;         // grid nodes per side
-    static constexpr double SPAN = 4.0;  // plate width in world units
-    static constexpr double HEIGHT = 1.2;// height exaggeration
+    static constexpr int N = 72;          // grid nodes per side
+    static constexpr double SPAN = 4.0;   // plate width in world units
+    static constexpr double HEIGHT = 1.2; // height exaggeration
     static constexpr double AMP_REF = 0.6;
     static constexpr double C = 3.0;     // wave speed
     static constexpr double DAMP = 0.15; // velocity damping
@@ -105,9 +105,9 @@ class WaveDemo : public DemoBase {
     // J0 via Abramowitz & Stegun 9.4.1 (valid for |x| <= 3, which covers us)
     static double bessel_j0(double x) {
         const double t = (x / 3.0) * (x / 3.0);
-        return 1.0 - 2.2499997 * t + 1.2656208 * t * t -
-               0.3163866 * t * t * t + 0.0444479 * t * t * t * t -
-               0.0039444 * t * t * t * t * t + 0.0002100 * t * t * t * t * t * t;
+        return 1.0 - 2.2499997 * t + 1.2656208 * t * t - 0.3163866 * t * t * t +
+               0.0444479 * t * t * t * t - 0.0039444 * t * t * t * t * t +
+               0.0002100 * t * t * t * t * t * t;
     }
 
     void reset() {
@@ -146,7 +146,7 @@ class WaveDemo : public DemoBase {
     void step(const PDE::Laplacian &lap, const PDE::Laplacian &lapv,
               double dt) {
         Eigen::VectorXd a = lap.eval(m_u); // c^2 lap(u), interior only
-        a += KV * lapv.eval(m_v);          // structural damping, kills grid noise
+        a += KV * lapv.eval(m_v); // structural damping, kills grid noise
         m_v += dt * a;
         m_v *= std::exp(-DAMP * dt);
         m_u += dt * m_v;

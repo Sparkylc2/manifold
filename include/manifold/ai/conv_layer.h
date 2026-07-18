@@ -3,6 +3,7 @@
 #include <unsupported/Eigen/CXX11/Tensor>
 
 #include <random>
+#include <vector>
 
 namespace manifold::AI {
 
@@ -16,8 +17,10 @@ struct ConvolutionalLayer : public Layer {
     // forward caches (for backprop)
     // x = input (W + 2*pad, H + 2*pad, C_in, B),
     // z = pre-activation (W', H', C_out, B)
+    // P = im2col patches (non-transposed only), reused by backward's correlate
     Tensor<double, 4> x_cache;
     Tensor<double, 4> z_cache;
+    std::vector<MatrixXd> P_cache;
 
     // gradients
     Tensor<double, 4> gK;
@@ -55,17 +58,44 @@ struct ConvolutionalLayer : public Layer {
 
     // --- helpers for forward and backward ---
     // convolution, padded-large -> small (out channels = K.dimension(3))
-    Tensor<double, 3> gather(const Tensor<double, 3> &large_n) const;
+    Tensor<double, 3> gather(const Tensor<double, 3> &large_n,
+                             bool naive = false) const;
     // adjoint of gather, small -> padded-large of size (Wl, Hl)
-    Tensor<double, 3> scatter(const Tensor<double, 3> &small_n, int Wl,
-                              int Hl) const;
+    Tensor<double, 3> scatter(const Tensor<double, 3> &small_n, int Wl, int Hl,
+                              bool naive = false) const;
 
     // gK(ka,kb,c,o)+= (sum_ij) small(i,j,o) * large(i*s+ka,j*s+kb,c)
     void correlate(const Tensor<double, 3> &large_n,
-                   const Tensor<double, 3> &small_n, Tensor<double, 4> &gK);
+                   const Tensor<double, 3> &small_n, Tensor<double, 4> &gK,
+                   bool naive = false);
+
+    // scalar hand-loop reference implementations
+    Tensor<double, 3> gather_naive(const Tensor<double, 3> &large_n) const;
+    Tensor<double, 3> scatter_naive(const Tensor<double, 3> &small_n, int Wl,
+                                    int Hl) const;
+    void correlate_naive(const Tensor<double, 3> &large_n,
+                         const Tensor<double, 3> &small_n,
+                         Tensor<double, 4> &gK);
+
+    // im2col + GEMM equivalents
+    Tensor<double, 3> gather_quick(const Tensor<double, 3> &large_n) const;
+    Tensor<double, 3> scatter_quick(const Tensor<double, 3> &small_n, int Wl,
+                                    int Hl) const;
+    void correlate_quick(const Tensor<double, 3> &large_n,
+                         const Tensor<double, 3> &small_n,
+                         Tensor<double, 4> &gK);
+
+    MatrixXd im2col(const Tensor<double, 3> &large_n, int Ws, int Hs) const;
+    void col2im(const MatrixXd &cols, int Ws, int Hs,
+                Tensor<double, 3> &out) const;
+
+    // GEMM halves operating on precomputed im2col patches P
+    Tensor<double, 3> gather_from_cols(const MatrixXd &P, int Ws, int Hs) const;
+    void correlate_from_cols(const MatrixXd &P, const Tensor<double, 3> &small_n,
+                             Tensor<double, 4> &gK);
 
     void add_bias(Tensor<double, 3> &Z_n) const;
-    void add_to_gb(const Tensor<double, 3> &dZ_n);
+    void add_to_gb(const Tensor<double, 3> &dZ_n, VectorXd &gb_out);
     void resize_caches(int B);
 
     // --- helpers for sizes ---

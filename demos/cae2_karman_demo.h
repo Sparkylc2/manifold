@@ -6,6 +6,7 @@
 #include <manifold/renderer/demo_base.h>
 #include <manifold/renderer/field_view.h>
 #include <manifold/renderer/plot_widget.h>
+#include <manifold/solver/forces/beam_bending.h>
 
 #include <algorithm>
 #include <atomic>
@@ -25,12 +26,6 @@ using Vector2d = Eigen::Vector2d;
 using VectorXd = Eigen::VectorXd;
 using MatrixXd = Eigen::MatrixXd;
 
-// Karman street reconstructed by a convolutional autoencoder trained live.
-// The CAE is far heavier than the POD-reduced dense AE, so training runs on a
-// worker thread (like the POD solve in karman_pod) and the render never stalls.
-// The net operates on a coarse (nx*ny, 2-channel) velocity field sampled from
-// the full-res flow; it starts reconstructing garbage and sharpens as it
-// learns.
 class CAE2KarmanDemo : public DemoBase {
   public:
     // full-res fluid + live display
@@ -98,6 +93,18 @@ class CAE2KarmanDemo : public DemoBase {
         m_loss_plot.clear();
 
         start_worker();
+
+        beam.m_L = 10;
+        beam.m_E = 1.0;
+        beam.m_I = 10.0;
+
+        beam.add_bc(Solver::BCType::Clamped, 0.0);
+        beam.add_bc(Solver::BCType::Free, beam.m_L);
+        beam.add_point_load(1, beam.m_L);
+        beam.prepare_system();
+        beam.solve_system();
+        std::cout << "Deflection: " << beam.get_deflection(beam.m_L)
+                  << std::endl;
     }
 
     void process(double dt) override {
@@ -158,7 +165,6 @@ class CAE2KarmanDemo : public DemoBase {
               Rendering::palette::accent2());
 
         draw_reconstruction(r, o, vmax);
-        draw_latent(r, o);
         draw_hud(r);
         m_loss_plot.render(r, 12, r->screen_height() - 92, 280, 80);
     }
@@ -456,6 +462,7 @@ class CAE2KarmanDemo : public DemoBase {
     double m_pub_loss = 0.0, m_pub_err = 0.0;
     int m_pub_epochs = 0;
     bool m_pub_dirty = false;
+    Solver::BeamBending beam;
 };
 
 } // namespace manifold::Demo

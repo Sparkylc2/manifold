@@ -27,6 +27,41 @@ double fd(double* p, F loss){
 
 static double relerr(double a,double b){ return std::abs(a-b)/(std::abs(b)+1e-7); }
 
+static void randfill(Tensor<double,3>& t, std::mt19937& rng){
+    std::normal_distribution<double> d(0,1);
+    for(int i=0;i<t.size();i++) t.data()[i]=d(rng);
+}
+static double maxabsdiff(const Tensor<double,3>& a, const Tensor<double,3>& b){
+    double e=0; for(int i=0;i<a.size();i++) e=std::max(e,std::abs(a.data()[i]-b.data()[i])); return e;
+}
+
+// ---- im2col+GEMM (quick) vs hand-loop (naive) equivalence ----
+void check_conv_quick(bool transposed){
+    std::mt19937 rng(11);
+    ConvolutionalLayer L;
+    L.init(2,3,3,3,6,5,2,1, Act::Tanh, rng, transposed, transposed?1:0);
+    const int p=1;
+    const int Clarge=(int)L.K.dimension(2), Csmall=(int)L.K.dimension(3);
+    const int Wl=L.W+2*p, Hl=L.H+2*p;
+    const int Ws=(Wl-L.k_W)/L.stride+1, Hs=(Hl-L.k_H)/L.stride+1;
+
+    Tensor<double,3> large(Wl,Hl,Clarge); randfill(large,rng);
+    Tensor<double,3> small(Ws,Hs,Csmall); randfill(small,rng);
+
+    check(transposed?"convT gather quick==naive":"conv gather quick==naive",
+          maxabsdiff(L.gather(large,false), L.gather(large,true)), 1e-9);
+    check(transposed?"convT scatter quick==naive":"conv scatter quick==naive",
+          maxabsdiff(L.scatter(small,Wl,Hl,false), L.scatter(small,Wl,Hl,true)), 1e-9);
+
+    Tensor<double,4> gKq(L.K.dimension(0),L.K.dimension(1),Clarge,Csmall);
+    Tensor<double,4> gKn(L.K.dimension(0),L.K.dimension(1),Clarge,Csmall);
+    gKq.setZero(); gKn.setZero();
+    L.correlate(large,small,gKq,false);
+    L.correlate(large,small,gKn,true);
+    double e=0; for(int i=0;i<gKq.size();i++) e=std::max(e,std::abs(gKq.data()[i]-gKn.data()[i]));
+    check(transposed?"convT correlate quick==naive":"conv correlate quick==naive", e, 1e-9);
+}
+
 // ---- ConvolutionalLayer gradient check ----
 void check_conv(bool transposed, Act act){
     std::mt19937 rng(7);
@@ -107,6 +142,8 @@ int main(){
     printf("== ConvolutionalLayer (normal) ==\n");   check_conv(false, Act::Tanh);
     printf("== ConvolutionalLayer (transposed) ==\n");check_conv(true,  Act::Tanh);
     printf("== ConvolutionalLayer (ReLU) ==\n");      check_conv(false, Act::ReLU);
+    printf("== Conv quick vs naive (normal) ==\n");   check_conv_quick(false);
+    printf("== Conv quick vs naive (transposed) ==\n");check_conv_quick(true);
     printf("== DenseLayer ==\n");                     check_dense(Act::Tanh);
     printf("== ConvolutionalAutoencoder ==\n");       check_cae();
     printf("\n%s (%d failure%s)\n", failures? "SOME TESTS FAILED":"ALL TESTS PASSED",

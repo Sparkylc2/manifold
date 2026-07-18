@@ -22,7 +22,6 @@ class Autoencoder : public ReducedModel {
 
     // refresh the training set: compute normalization, cache normalized data
     void set_data(const MatrixXd &X);
-
     double train_epoch(const TrainConfig &cfg);
 
     // full run

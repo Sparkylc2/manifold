@@ -15,6 +15,8 @@ endif()
 # dependencies
 include(cmake/FetchDependencies.cmake)
 
+find_package(OpenMP)
+
 # ---- solver library  ----
 add_library(manifold_solver STATIC
     src/solver/conjugate_gradient_sle_solver.cpp
@@ -73,7 +75,11 @@ add_library(manifold_ai STATIC
     src/ai/svd.cpp
 )
 target_include_directories(manifold_ai PUBLIC include)
-target_link_libraries(manifold_ai PUBLIC Eigen3::Eigen)
+target_link_libraries(manifold_ai PUBLIC Eigen3::Eigen )
+target_link_libraries(manifold_ai PUBLIC Spectra::Spectra)
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(manifold_ai PUBLIC OpenMP::OpenMP_CXX)
+endif()
 
 
 # ---- control (header-only for now) ----
