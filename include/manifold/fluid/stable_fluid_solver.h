@@ -176,6 +176,13 @@ class StableFluidSolver : public FluidSolver {
         diffuse(0, m_dens, m_dens_prev, m_diff, dt);
         m_dens_prev.swap(m_dens);
         advect(0, m_dens, m_dens_prev, m_u, m_v, dt);
+
+        // exponential decay so injected dye fades instead of persisting forever
+        if (m_dens_dissipation > 0.0) {
+            const double s = 1.0 / (1.0 + dt * m_dens_dissipation);
+            for (size_t k = 0; k < m_dens.size(); k++)
+                m_dens[k] *= s;
+        }
     }
 
     void vel_step(double dt) {
@@ -502,6 +509,9 @@ class StableFluidSolver : public FluidSolver {
         m_dens_prev.zero();
     }
 
+    // dye decay rate (1/s); 0 = conserved (default)
+    void set_density_dissipation(double rate) { m_dens_dissipation = rate; }
+
     // dye injection
     void add_density_source(int i, int j, double amount) override {
         if (i < 1 || i > (int)m_nx || j < 1 || j > (int)m_ny) {
@@ -569,6 +579,7 @@ class StableFluidSolver : public FluidSolver {
     bool m_has_solid = false;
     double m_eta = 1e-4; // penalization permeability (
     double m_rho = 1.0;  // fluid density (scales the reported force)
+    double m_dens_dissipation = 0.0; // dye decay rate (1/s)
 
     Vector2d m_obstacle_force = Vector2d::Zero();
     double m_obstacle_torque = 0.0; // about world origin

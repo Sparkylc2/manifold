@@ -24,6 +24,7 @@
 #include "../pde_demo.h"
 #include "../pendulum_demo.h"
 #include "../pod_karman_demo.h"
+#include "../rocket_landing_demo.h"
 #include "../radial_engine_demo.h"
 #include "../solar_system_demo.h"
 #include "../spring_demo.h"
@@ -86,6 +87,12 @@ inline void populate_registry(DemoRegistry &registry) {
     registry.add<Demo::FluidDemo>(
         "fluid", "Stable Fluids", "Fluids",
         "Stam stable-fluid solver; left-drag to add velocity and dye");
+
+    registry.add<Demo::RocketLandingDemo>(
+        "rocket_landing", "Rocket Landing", "Fluids",
+        "Self-landing rocket in a tall still-air domain: gimballed thrust-vector "
+        "control + phased PD guidance, exhaust dye one-way coupled, lands on the "
+        "pad via the optional collision resolver");
 
     registry.add<Demo::KarmanDemo>("karman", "Karman Vortex", "Fluids",
                                    "Flow past a cylinder (volume "

@@ -17,3 +17,6 @@ ideas:
 - simulating circuits
 - see if we could technically build a clock
 - add beam bending or some 2d finite element method
+- add self landing rocket
+- show an integrator circuit with op-amps
+- simulate a motor from scratch (ie the electrical physics behind how a motor works)

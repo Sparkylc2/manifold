@@ -81,6 +81,25 @@ if(OpenMP_CXX_FOUND)
     target_link_libraries(manifold_ai PUBLIC OpenMP::OpenMP_CXX)
 endif()
 
+# ---- electrical ----
+add_library(manifold_electrical STATIC
+    src/electrical/elements/capacitor.cpp
+    src/electrical/elements/current_source.cpp
+    src/electrical/elements/inductor.cpp
+    src/electrical/elements/op_amp.cpp
+    src/electrical/elements/resistor.cpp
+    src/electrical/elements/voltage_source.cpp
+    src/electrical/circuit_assembler.cpp
+    src/electrical/circuit_system.cpp
+)
+target_include_directories(manifold_electrical PUBLIC include)
+target_link_libraries(manifold_electrical PUBLIC Eigen3::Eigen )
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(manifold_ai PUBLIC OpenMP::OpenMP_CXX)
+endif()
+
+
+
 
 # ---- control (header-only for now) ----
 add_library(manifold_control INTERFACE)
