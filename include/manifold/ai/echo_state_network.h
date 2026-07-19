@@ -1,14 +1,17 @@
 #pragma once
 #include <Eigen/Core>
+#include <Eigen/Dense>
 #include <Eigen/Sparse>
 #include <Spectra/GenEigsSolver.h>
 #include <Spectra/MatOp/SparseGenMatProd.h>
 #include <manifold/ai/layer.h>
+#include <manifold/ai/utilities.h>
 #include <random>
 #include <unsupported/Eigen/CXX11/Tensor>
 
 namespace manifold::AI {
 
+using MatVec = std::vector<MatrixXd>;
 class ESN {
 
   public:
@@ -23,19 +26,24 @@ class ESN {
         // numbers (i cant think of anything better)
         int N_r = 100;   // number of reservoir neurons
         int N_wash = 50; // number of washout steps
+        int N_split = 4; // number of splits to training data
 
         // data config
         int upsample;           // upsample * dt_model = dt_ESN
         NormMethod norm_method; // determines what normalization method is used
         WInType W_in_type;      // determines if Win is sparse or dense
                                 // on the input data
-        VectorXd observed_idx; // determines what indices of a data snapshot are
-                               // observed
+        std::vector<int> observed_idx; // determines what indices of a data
+                                       // snapshot are observed
 
         // hyperparameters
         double noise = 1e-10; // noise scale
+        double tikh = 1e-12;  // for regularizing diagonal in ridge regression
         double rho = 0.9;     // spectral radius of the reservoir projector (how
                               // quickly previous state contributions die out)
+
+        double bias_in = 0.1;  // input symmetry-breaking bias
+        double bias_out = 1.0; // output symmetry-breaking bias
 
         double sigma_in =
             1e-2; // dictates input sensitivity of reservoir neuron to input
@@ -46,22 +54,29 @@ class ESN {
         int seed = 12345; // seed for any random generation
     };
 
-    ESN(const double dt_model, const MatrixXd y, const ESNConfig cfg) {
-        m_cfg = cfg;
-        // y is input data (N_dim, Time)
+    ESN(const double dt_model, const MatrixXd y, ESNConfig cfg) {
+        // y is input shape data (N_dim, N_t)
 
+        m_cfg = cfg;
         m_dt_ESN = cfg.upsample * dt_model;
+        m_dt_model = dt_model;
 
         m_N_train = (int)std::round(cfg.t_train / m_dt_ESN);
         m_N_val = (int)std::round(cfg.t_val / m_dt_ESN);
         m_N_test = (int)std::round(cfg.t_test / m_dt_ESN);
+        m_N_r = cfg.N_r;
+        m_N_dim_in =
+            cfg.observed_idx.empty() ? y.rows() : cfg.observed_idx.size();
+        m_N_dim = y.rows();
+
+        if (cfg.observed_idx.empty()) {
+            cfg.observed_idx.resize(m_N_dim_in);
+            std::iota(cfg.observed_idx.begin(), cfg.observed_idx.end(), 0);
+        }
 
         m_sparsity = 1.0 - cfg.connected / (m_N_r - 1.0);
 
-        m_N_r = cfg.N_r;
         m_rng.seed(cfg.seed);
-
-        m_N_x = y.rows();
     }
 
     void generate_W_W_in(int seed) {
@@ -69,15 +84,16 @@ class ESN {
         // with sparsity constraints
 
         // m_n_x + 1 if a bias is added
-        m_W_in.resize(m_N_r, m_N_x_in);
+        m_W_in.resize(m_N_r, m_N_dim_in);
         m_W.resize(m_N_r, m_N_r);
 
         // one per row with m_N_r rows
-        std::vector<Eigen::Triplet<double>> W_in_t(m_N_r);
+        std::vector<Eigen::Triplet<double>> W_in_t;
         std::vector<Eigen::Triplet<double>> W_t;
+        W_in_t.reserve(m_N_r);
 
         // W_in
-        std::uniform_int_distribution<int> col_dist(0, m_N_x_in - 1);
+        std::uniform_int_distribution<int> col_dist(0, m_N_dim_in - 1);
         // W
         std::uniform_real_distribution<double> uni_dist(0.0, 1.0);
         // both
@@ -91,7 +107,7 @@ class ESN {
                 const double random_weight = val_dist(m_rng);
                 W_in_t.emplace_back(i, random_col, random_weight);
             } else {
-                for (int j = 0; j < m_N_x_in; j++) {
+                for (int j = 0; j < m_N_dim_in; j++) {
                     const double random_weight = val_dist(m_rng);
                     W_in_t.emplace_back(i, j, random_weight);
                 }
@@ -100,7 +116,7 @@ class ESN {
         m_W_in.setFromTriplets(W_in_t.begin(), W_in_t.end());
 
         // populating W
-        const int keep = 1.0 - m_sparsity;
+        const double keep = 1.0 - m_sparsity;
         for (int i = 0; i < m_N_r; i++) {
             for (int j = 0; j < m_N_r; j++) {
                 if (uni_dist(m_rng) < keep) {
@@ -125,39 +141,45 @@ class ESN {
         m_W = m_W / spectral_radius;
     }
 
-    void split_and_format_data(const Tensor<double, 3> &data,
-                               Tensor<double, 3> &U_wtv,
-                               Tensor<double, 3> &Y_wtv,
-                               Tensor<double, 3> &U_test,
-                               Tensor<double, 3> &Y_test) {
-        // data has dimension [(L) x Nt x N_dim]a
-        Eigen::array<Eigen::Index, 3> strides = {1, m_cfg.upsample, 1};
-        Tensor<double, 3> Y = data.stride(strides);
-        Tensor<double, 3> U = {
-            Y.dimension(0),           // L
-            Y.dimension(1),           // N_t
-            m_cfg.observed_idx.size() // N_dim_in
+    void split_and_format_data(const MatVec &data, MatVec &U_wtv, MatVec &Y_wtv,
+                               MatVec &U_test, MatVec &Y_test) {
+
+        auto apply_matrix_fn = [&](const MatVec &in, MatVec &out, auto fn) {
+            for (int i = 0; i < in.size(); i++) {
+                fn(in[i], out[i]);
+            }
         };
 
-        for (int i = 0; i < m_cfg.observed_idx.size(); ++i) {
-            int target_idx = m_cfg.observed_idx[i];
-            U.chip(i, 2) = Y.chip(target_idx, 2);
-        }
+        // data has dimension [(L) x Nt x N_dim]
+        MatVec Y;
+        Y.reserve(data.size());
+        // upsamples y
+        apply_matrix_fn(data, Y, [&](const MatrixXd &d, MatrixXd &Y_l) {
+            int j = 0;
+            for (int i = 0; i < d.rows(); i += m_cfg.upsample) {
+                Y_l.conservativeResize(Y_l.rows() + 1, d.cols());
+                Y_l.row(j++) = d.row(i);
+            }
+        });
 
-        if (m_N_x_in != m_cfg.observed_idx.size())
-            throw std::runtime_error(
-                "input dimension does not match observed dimension");
+        assert(Y[0].cols() == m_N_dim && "incorrect data shape");
 
-        assert(m_N_dim_in == m_observed_idx.size() &&
-               "input dimension does not match observed dimension");
+        MatVec U;
+        U.reserve(Y.size()); // L
+        apply_matrix_fn(Y, U, [&](const MatrixXd &Y_l, MatrixXd &U_l) {
+            // [N_t x N_dim_in ]
+            U_l.resize(Y_l.rows(), m_N_dim_in);
+            for (int j = 0; j < m_N_dim_in; j++)
+                U_l.col(j) = Y_l.col(m_cfg.observed_idx[j]);
+        });
 
-        const int L = Y.dimension(0);
-        const int N_t = Y.dimension(1);
-        const int N_dim_Y = Y.dimension(2);
+        const int L = Y.size();
+        const int N_t = Y[0].rows();
+        const int N_dim_Y = m_N_dim;
         const int N_wtv =
             m_N_train + m_N_val; // cut off dimension for training data
 
-        if (U.dimension(1) < N_wtv)
+        if (U[0].rows() < N_wtv)
             throw std::runtime_error(
                 "increase length of the training data signal");
 
@@ -165,90 +187,226 @@ class ESN {
         // the "current" state, and Y_wtv the "next" state.
         // collects everything from the first snapshot to the
         // cutoff set by N_train and N_val
-        const int wtv_len = N_wtv - 1;
-
-        Eigen::array<Eigen::Index, 3> U_wtv_offset = {0, 0, 0};
-        Eigen::array<Eigen::Index, 3> U_wtv_extent = {L, wtv_len, m_N_x_in};
-        U_wtv = U.slice(U_wtv_offset, U_wtv_extent);
-
-        Eigen::array<Eigen::Index, 3> Y_wtv_offset = {0, 1, 0}; // 1 in N_t
-        Eigen::array<Eigen::Index, 3> Y_wtv_extent = {L, wtv_len, N_dim_Y};
-        Y_wtv = Y.slice(Y_wtv_offset, Y_wtv_extent);
-
         // U_test and Y_test just contain the remaining data to be used
         // for testing (with the same time offset)
+        const int wtv_len = N_wtv - 1;
         const int test_len = N_t - N_wtv - 1;
 
-        Eigen::array<Eigen::Index, 3> U_test_offset = {0, N_wtv, 0};
-        Eigen::array<Eigen::Index, 3> U_test_extent = {L, test_len, m_N_x_in};
-        U_test = U.slice(U_test_offset, U_test_extent);
+        U_wtv.reserve(U.size());
+        Y_wtv.reserve(Y.size());
+        U_test.reserve(U.size());
+        Y_test.reserve(Y.size());
 
-        Eigen::array<Eigen::Index, 3> Y_test_offset = {0, N_wtv + 1, 0};
-        Eigen::array<Eigen::Index, 3> Y_test_extent = {L, test_len, N_dim_Y};
-        Y_test = Y.slice(Y_test_offset, Y_test_extent);
+        for (int i = 0; i < U.size(); i++) {
 
-        if (U_wtv.dimension(1) != Y_wtv.dimension(1))
-            throw std::runtime_error("inconsistent shapes for train data");
+            U_wtv.push_back(U[i].block(0, 0, wtv_len, m_N_dim_in));
+            Y_wtv.push_back(Y[i].block(1, 0, wtv_len, m_N_dim));
 
-        if (U_test.dimension(1) != Y_test.dimension(1))
-            throw std::runtime_error("inconsistent shapes for test data");
+            U_test.push_back(U[i].block(N_wtv, 0, test_len, m_N_dim_in));
+            Y_test.push_back(Y[i].block(N_wtv + 1, 0, test_len, m_N_dim_in));
+        }
 
         set_norm(U_wtv);
     };
 
-    void set_norm(const Tensor<double, 3> &data) {
-        const int L = data.dimension(0);
-        const int N_t = data.dimension(1);
-        const int N_dim = data.dimension(2);
+    void step(const MatrixXd &x, const MatrixXd &r, MatrixXd &x_out,
+              MatrixXd &r_out) {
+        // x is [N_in, N_ensemble], r is (N_r, N_ens)
+        MatrixXd x_norm = normalize_input(x);
+        r_out = (m_cfg.sigma_in * m_W_in * x_norm + m_cfg.rho * m_W * r)
+                    .array()
+                    .tanh()
+                    .matrix();
+        x_out = reservoir_to_physical(r_out);
+    }
+
+    // open-loop, driven with a real observed input, returns the full state
+    // prediction
+    MatrixXd advance(const VectorXd &x_obs) {
+        MatrixXd x_out, r_out;
+        step(x_obs, m_r, x_out, r_out);
+        m_r = r_out;
+        return x_out; // (N_dim, 1)
+    }
+
+    // closed-loop, feeds the last prediction back with no fresh data
+    MatrixXd predict_step() {
+        MatrixXd x_in = outputs_to_inputs(reservoir_to_physical(m_r));
+        MatrixXd x_out, r_out;
+        step(x_in, m_r, x_out, r_out);
+        m_r = r_out;
+        return x_out; // (N_dim, 1)
+    }
+
+    // forecasts n_steps ahead with a washout phase
+    MatrixXd forecast(const MatrixXd &wash_input, int n_steps) {
+        reset_state();
+        for (int t = 0; t < wash_input.rows(); t++)
+            advance(wash_input.row(t).transpose());
+
+        MatrixXd Y_pred(m_N_dim, n_steps);
+        for (int i = 0; i < n_steps; i++)
+            Y_pred.col(i) = predict_step();
+
+        return Y_pred;
+    }
+
+    void train(const MatVec &train_data) {
+        MatVec U_wtv, Y_wtv, U_test, Y_test;
+        split_and_format_data(train_data, U_wtv, Y_wtv, U_test, Y_test);
+        generate_W_W_in(m_cfg.seed);
+
+        m_W_out = MatrixXd::Zero(m_N_r, m_N_dim);
+        m_W_out = solve_ridge_regression(U_wtv, Y_wtv);
+    }
+
+    MatrixXd solve_ridge_regression(const MatVec &U_wtv, const MatVec &Y_wtv) {
+        MatrixXd LHS, RHS;
+        compute_RR_terms(LHS, RHS, U_wtv, Y_wtv);
+        LHS.diagonal().array() += m_cfg.tikh; // regularises the diagonal
+        return LHS.ldlt().solve(RHS);         // LHS is symmetric PD after tikh
+    }
+
+    void compute_RR_terms(MatrixXd &LHS, MatrixXd &RHS, const MatVec &U_wtv,
+                          const MatVec &Y_wtv) {
+        LHS = MatrixXd::Zero(m_N_r, m_N_r);
+        RHS = MatrixXd::Zero(m_N_r, m_N_dim);
+
+        // (this really belongs in train() once you write it)
+        if (m_W_out.size() == 0)
+            m_W_out = MatrixXd::Zero(m_N_r, m_N_dim);
+
+        for (int l = 0; l < (int)U_wtv.size(); l++) {
+            const MatrixXd &U_l = U_wtv[l]; // (wtv_len, N_dim_in)
+            const MatrixXd &Y_l = Y_wtv[l]; // (wtv_len, N_dim)
+
+            const int in_rows = U_l.rows() - m_cfg.N_wash;
+            assert(in_rows > 0 && "segment too short for washout + training");
+
+            // washout from a zero reservoir state
+            MatrixXd r = MatrixXd::Zero(m_N_r, 1);
+            MatrixXd x_out, r_out;
+            for (int t = 0; t < m_cfg.N_wash; t++) {
+                step(U_l.row(t).transpose(), r, x_out, r_out);
+                r = r_out;
+            }
+
+            const MatrixXd U_in =
+                U_l.block(m_cfg.N_wash, 0, in_rows, m_N_dim_in);
+            const MatrixXd Y_in = Y_l.block(m_cfg.N_wash, 0, in_rows, m_N_dim);
+
+            const int base = in_rows / m_cfg.N_split;
+            const int rem = in_rows % m_cfg.N_split;
+
+            int row0 = 0;
+            for (int s = 0; s < m_cfg.N_split; s++) {
+                const int chunk = base + (s < rem ? 1 : 0);
+                if (chunk == 0)
+                    continue;
+
+                // each split restarts from the post-washout state
+                MatrixXd r_s = r;
+                MatrixXd R_open(chunk, m_N_r);
+                for (int i = 0; i < chunk; i++) {
+                    step(U_in.row(row0 + i).transpose(), r_s, x_out, r_out);
+                    r_s = r_out;
+                    R_open.row(i) = r_out.transpose(); // (N_r,1) -> row
+                }
+
+                const MatrixXd Y_t = Y_in.block(row0, 0, chunk, m_N_dim);
+                LHS += R_open.transpose() * R_open; // (N_r, N_r)
+                RHS += R_open.transpose() * Y_t;    // (N_r, N_dim)
+                row0 += chunk;
+            }
+        }
+    }
+
+    void set_norm(const MatVec &data) {
+        const int L = data.size();
+        const int N_t = data[0].rows();
+        const int N_dim = data[0].cols();
+
+        for (const auto &d : data) {
+            if (d.rows() != N_t || d.cols() != N_dim)
+                throw std::runtime_error(
+                    "set_norm: all matrices must be same size");
+        }
 
         if (m_cfg.norm_method == NormMethod::None) {
             m_norm = VectorXd::Ones(N_dim);
             m_shift = VectorXd::Zero(N_dim);
         }
 
-        const Eigen::array<Eigen::Index, 1> time_axis{1};
-        const Eigen::array<Eigen::Index, 1> L_axis{0};
+        VectorXd shift_accum = VectorXd::Zero(N_dim);
+        VectorXd norm_accum = VectorXd::Zero(N_dim);
 
-        // shift is temporal mean -> [L, Ndim]
-        Eigen::Tensor<double, 2> shift_L = data.mean(time_axis);
-        // zero-mean data, so broadcast shift [L,1,Ndim] over time ->
-        // [L,N_t,Ndim]
-        Eigen::Tensor<double, 3> shift_b =
-            shift_L.reshape(Eigen::array<Eigen::Index, 3>{L, 1, N_dim})
-                .broadcast(Eigen::array<Eigen::Index, 3>{1, N_t, 1});
+        for (const MatrixXd &d : data) {
+            // temporal mean for this trajectory: [N_dim]
+            VectorXd shift_l = d.colwise().mean().transpose();
 
-        Eigen::Tensor<double, 3> X_c = data - shift_b;
+            // center by subtracting shift_l from every row
+            MatrixXd X_c = d.rowwise() - shift_l.transpose();
 
-        Eigen::Tensor<double, 2> norm_L; // [L, Ndim]
-        switch (m_cfg.norm_method) {
-        case NormMethod::Std: // populated with std = sqrt(mean(x^2))
-            norm_L = X_c.square().mean(time_axis).sqrt();
-            break;
-        case NormMethod::Max:
-            norm_L = X_c.maximum(time_axis);
-            break;
-        case NormMethod::Mean:
-            norm_L = X_c.abs().mean(time_axis);
-            break;
-        case NormMethod::Range:
-            norm_L = X_c.maximum(time_axis) - X_c.minimum(time_axis);
-            break;
-        default:
-            break;
+            VectorXd norm_l(N_dim);
+
+            switch (m_cfg.norm_method) {
+            case NormMethod::Std:
+                // sqrt(mean(x^2)) over time, per column
+                norm_l = ((X_c.array().square().colwise().mean()).sqrt())
+                             .matrix()
+                             .transpose();
+                break;
+
+            case NormMethod::Max:
+                // maximum over time, per column
+                norm_l = X_c.colwise().maxCoeff().transpose();
+                break;
+
+            case NormMethod::Mean:
+                // mean(abs(x)) over time, per column
+                norm_l =
+                    (X_c.array().abs().colwise().mean()).matrix().transpose();
+                break;
+
+            case NormMethod::Range: {
+                RowVectorXd max_v = X_c.colwise().maxCoeff();
+                RowVectorXd min_v = X_c.colwise().minCoeff();
+                norm_l = (max_v - min_v).transpose();
+                break;
+            }
+
+            default:
+                throw std::runtime_error(
+                    "set_norm: unsupported normalization method");
+            }
+
+            shift_accum += shift_l;
+            norm_accum += norm_l;
         }
 
-        // average over L -> [Ndim]
-        Eigen::Tensor<double, 1> norm_t = norm_L.mean(L_axis);
-        Eigen::Tensor<double, 1> shift_t = shift_L.mean(L_axis);
-
-        Eigen::VectorXd m_norm =
-            Eigen::Map<Eigen::VectorXd>(norm_t.data(), N_dim);
-        Eigen::VectorXd m_shift =
-            Eigen::Map<Eigen::VectorXd>(shift_t.data(), N_dim);
+        m_shift = shift_accum / L;
+        m_norm = norm_accum / L;
 
         for (int i = 0; i < N_dim; ++i)
             if (std::abs(m_norm(i)) < 1e-12)
                 m_norm(i) = 1.0;
+    }
+
+    MatrixXd reservoir_to_physical(const MatrixXd &r) {
+        return m_W_out.transpose() * r;
+    }
+
+    MatrixXd outputs_to_inputs(const MatrixXd &state) {
+        MatrixXd obs(m_N_dim_in, state.cols());
+        for (int j = 0; j < m_N_dim_in; j++)
+            obs.row(j) = state.row(m_cfg.observed_idx[j]);
+
+        return obs;
+    }
+    void reset_state() { m_r = MatrixXd::Zero(m_N_r, 1); }
+
+    MatrixXd normalize_input(const MatrixXd &input) {
+        return (input.colwise() - m_shift).array().colwise() / m_norm.array();
     }
 
   private:
@@ -278,20 +436,35 @@ class ESN {
     // linear combination
     MatrixXd m_W_out;
 
+    // holds the testing U and Y values
+    MatrixXd m_U_test;
+    MatrixXd m_Y_test;
+
+    MatrixXd m_r; // (N_r, 1), live reservoir state for streaming use
+
     // row dimension of input data x(t_i)
-    int m_N_x;
+    int m_N_dim;
     // row dimension of resevoir state r(t_i)
     int m_N_r;
     // row dimension of the observed input data
-    int m_N_x_in;
+    int m_N_dim_in;
 
+    // number of training samples
     int m_N_train;
+    // number of validation samples
     int m_N_val;
+    // number of testing samples
     int m_N_test;
-    double m_dt_ESN;
 
-    VectorXd m_shift; // per component shift factor for the input data (N_x_in)
-    VectorXd m_norm;  // per component scale (N_x_in)
+    // timestep between each ESN column
+    double m_dt_ESN;
+    // timestep between each model column (the original data)
+    double m_dt_model;
+
+    // per component shift factor for the input data (N_x_in)
+    VectorXd m_shift;
+    // per component scale (N_x_in)
+    VectorXd m_norm;
 
     // contains all the configurable parameters for the model
     ESNConfig m_cfg;

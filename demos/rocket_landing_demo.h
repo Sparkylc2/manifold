@@ -36,14 +36,14 @@ class RocketLandingDemo : public DemoBase {
     static constexpr double H = ROWS * CELL; // 12.0
 
     static constexpr double G = 9.81;
-    static constexpr double MASS = 1.0;
+    static constexpr double MASS = 500.0;
     static constexpr int SUBSTEPS = 8;
 
     // thrust-vector control authority
-    static constexpr double TWR_MAX = 2.6;               // max thrust / weight
-    static constexpr double T_MAX = TWR_MAX * MASS * G;   //
-    static constexpr double T_MIN = 0.05 * T_MAX;         // keep gimbal authority
-    static constexpr double GIMBAL_MAX = 0.30;            // rad
+    static constexpr double TWR_MAX = 1.1;              // max thrust / weight
+    static constexpr double T_MAX = TWR_MAX * MASS * G; //
+    static constexpr double T_MIN = 0.01 * T_MAX;       // keep gimbal authority
+    static constexpr double GIMBAL_MAX = 0.08;          // rad
 
     // approach guidance
     static constexpr double KP_POS = 1.4;
@@ -67,9 +67,9 @@ class RocketLandingDemo : public DemoBase {
 
     // visualisation: colour by speed (karman ramp), light up where the air is
     // disturbed from rest, or where exhaust dye is present
-    static constexpr double VMAX = 5.0;         // colour scale (world/s)
-    static constexpr double PERT_MIN = 0.10;    // speed where alpha starts
-    static constexpr double PERT_REF = 1.40;    // speed where alpha saturates
+    static constexpr double VMAX = 5.0;      // colour scale (world/s)
+    static constexpr double PERT_MIN = 0.10; // speed where alpha starts
+    static constexpr double PERT_REF = 1.40; // speed where alpha saturates
     static constexpr int FADE_PX = 18;
 
     // landing latch
@@ -83,10 +83,9 @@ class RocketLandingDemo : public DemoBase {
 
     void initialize() override {
         // rocket outline (nose +y), recentred on its own centroid so p == COM
-        std::vector<Vector2d> pts = {{0.00, 0.48},  {0.12, 0.18},
-                                     {0.12, -0.28}, {0.20, -0.40},
-                                     {-0.20, -0.40}, {-0.12, -0.28},
-                                     {-0.12, 0.18}};
+        std::vector<Vector2d> pts = {
+            {0.00, 0.48},   {0.12, 0.18},   {0.12, -0.28}, {0.20, -0.40},
+            {-0.20, -0.40}, {-0.12, -0.28}, {-0.12, 0.18}};
         const Vector2d c = Fluid::polygon_centroid(pts);
         for (auto &q : pts)
             q -= c;
@@ -158,36 +157,37 @@ class RocketLandingDemo : public DemoBase {
 
     void process(double dt) override {
         control();
-        m_system.process(dt, SUBSTEPS); // integrate rocket under gravity + thrust
-        m_world.step();                 // resolve contacts with the pad
-        m_fluid.clear_sources();        // drop last frame's dye source
-        inject_exhaust();               // rocket -> fluid dye + momentum
+        m_system.process(dt,
+                         SUBSTEPS); // integrate rocket under gravity + thrust
+        m_world.step();             // resolve contacts with the pad
+        m_fluid.clear_sources();    // drop last frame's dye source
+        inject_exhaust();           // rocket -> fluid dye + momentum
         m_fluid.advance(dt);
     }
 
     void render(Rendering::Renderer *r) override {
         const Vector2d o = m_fluid.origin();
-        // air layer: colour by speed, alpha where the air is disturbed from rest
-        m_field.render(
-            r, o.x(), o.y(), CELL,
-            [this](double wx, double wy, double &val, double &a) {
-                Vector2d vel;
-                m_fluid.velocity_at(Vector2d(wx, wy), &vel,
-                                    Fluid::Interp::Cubic);
-                const double speed = vel.norm();
-                val = speed / VMAX;
-                a = std::clamp((speed - PERT_MIN) / (PERT_REF - PERT_MIN), 0.0,
-                               1.0);
-            });
+        // air layer: colour by speed, alpha where the air is disturbed from
+        // rest
+        m_field.render(r, o.x(), o.y(), CELL,
+                       [this](double wx, double wy, double &val, double &a) {
+                           Vector2d vel;
+                           m_fluid.velocity_at(Vector2d(wx, wy), &vel,
+                                               Fluid::Interp::Cubic);
+                           const double speed = vel.norm();
+                           val = speed / VMAX;
+                           a = std::clamp((speed - PERT_MIN) /
+                                              (PERT_REF - PERT_MIN),
+                                          0.0, 1.0);
+                       });
         // plume layer on top: exhaust dye in its own warm colour
-        m_plume.render(
-            r, o.x(), o.y(), CELL,
-            [this](double wx, double wy, double &val, double &a) {
-                const double d =
-                    m_fluid.density_at(Vector2d(wx, wy), Fluid::Interp::Cubic);
-                val = std::clamp(d, 0.0, 1.0);
-                a = std::clamp(d * 1.4, 0.0, 1.0);
-            });
+        m_plume.render(r, o.x(), o.y(), CELL,
+                       [this](double wx, double wy, double &val, double &a) {
+                           const double d = m_fluid.density_at(
+                               Vector2d(wx, wy), Fluid::Interp::Cubic);
+                           val = std::clamp(d, 0.0, 1.0);
+                           a = std::clamp(d * 1.4, 0.0, 1.0);
+                       });
 
         draw_pad(r);
         draw_rocket(r);
@@ -231,18 +231,20 @@ class RocketLandingDemo : public DemoBase {
             theta_des = std::atan2(-a_cmd.x(), a_cmd.y());
             T = MASS * std::max(0.0, a_cmd.dot(body_up(m_rocket.theta)));
         } else {
-            // terminal: hold near-upright, regulate sink rate, small lateral trim
-            const double tilt = KP_LAT * (m_rocket.p.x() - m_pad.x()) +
-                                KD_LAT * m_rocket.v.x();
+            // terminal: hold near-upright, regulate sink rate, small lateral
+            // trim
+            const double tilt =
+                KP_LAT * (m_rocket.p.x() - m_pad.x()) + KD_LAT * m_rocket.v.x();
             theta_des = std::clamp(tilt, -TILT_MAX, TILT_MAX);
-            T = MASS * std::max(0.0, KP_SINK * (-TOUCH_SPEED - m_rocket.v.y()) + G);
+            T = MASS *
+                std::max(0.0, KP_SINK * (-TOUCH_SPEED - m_rocket.v.y()) + G);
         }
 
         // attitude PD -> gimbal (negative: +gimbal yields -torque here)
         const double att_err = wrap_angle(theta_des - m_rocket.theta);
-        const double gim = std::clamp(
-            -(KP_ATT * att_err - KD_ATT * m_rocket.v_theta), -GIMBAL_MAX,
-            GIMBAL_MAX);
+        const double gim =
+            std::clamp(-(KP_ATT * att_err - KD_ATT * m_rocket.v_theta),
+                       -GIMBAL_MAX, GIMBAL_MAX);
 
         command_thrust(std::clamp(T, T_MIN, T_MAX), gim);
 
@@ -294,7 +296,8 @@ class RocketLandingDemo : public DemoBase {
         const Vector2d com = m_rocket.p;
         for (size_t i = 0; i < w.size(); i++) {
             const Vector2d &a = w[i], &b = w[(i + 1) % w.size()];
-            r->draw_triangle(com.x(), com.y(), a.x(), a.y(), b.x(), b.y(), fill);
+            r->draw_triangle(com.x(), com.y(), a.x(), a.y(), b.x(), b.y(),
+                             fill);
         }
         for (size_t i = 0; i < w.size(); i++) {
             const Vector2d &a = w[i], &b = w[(i + 1) % w.size()];
@@ -338,7 +341,9 @@ class RocketLandingDemo : public DemoBase {
     static Rendering::Colormap plume_ramp() {
         return [](double t) {
             t = std::clamp(t, 0.0, 1.0);
-            auto lp = [](double a, double b, double u) { return a + (b - a) * u; };
+            auto lp = [](double a, double b, double u) {
+                return a + (b - a) * u;
+            };
             double rr, gg, bb;
             if (t < 0.5) {
                 const double u = t / 0.5;
@@ -356,8 +361,9 @@ class RocketLandingDemo : public DemoBase {
         };
     }
 
-    Fluid::StableFluidSolver m_fluid{(unsigned)ROWS, (unsigned)COLS, CELL,
-                                     0.0,            0.0,           Vector2d(-W * 0.5, 0.0)};
+    Fluid::StableFluidSolver m_fluid{
+        (unsigned)ROWS,         (unsigned)COLS, CELL, 0.0, 0.0,
+        Vector2d(-W * 0.5, 0.0)};
 
     Solver::GenericRigidBodySystem m_system;
     Solver::GaussianEliminationSLESolver m_sle;
@@ -368,7 +374,8 @@ class RocketLandingDemo : public DemoBase {
     Solver::DirectForceGenerator m_thrust;
 
     Solver::Collision::World m_world;
-    Solver::Collision::HalfPlane m_floor{Vector2d(0.0, 0.0), Vector2d(0.0, 1.0)};
+    Solver::Collision::HalfPlane m_floor{Vector2d(0.0, 0.0),
+                                         Vector2d(0.0, 1.0)};
 
     Coupling::RigidBodyBoundary m_boundary{&m_rocket, Fluid::circle_sdf(0.3)};
 
@@ -377,9 +384,9 @@ class RocketLandingDemo : public DemoBase {
     Vector2d m_pad{0.0, 0.4};
 
     // initial state (position / attitude / velocity) -- edit to taste
-    Vector2d m_start_p{1.2, 9.0};
-    double m_start_theta = -0.5;
-    Vector2d m_start_v{-1.0, -2.0};
+    Vector2d m_start_p{1.2, 20};
+    double m_start_theta = -1;
+    Vector2d m_start_v{-7, -9.0};
 
     double m_throttle = 0.0, m_gimbal = 0.0;
     bool m_landed = false;

@@ -4,7 +4,7 @@
 #include <unsupported/Eigen/CXX11/Tensor>
 
 // returns sign of input
-namespace manifold::Utils {
+namespace manifold::AI::Utils {
 
 template <typename T> inline int sign(T val) {
     return (T(0) < val) - (val < T(0));
@@ -91,4 +91,17 @@ inline Eigen::Tensor<double, 4> crop_spatial(const Eigen::Tensor<double, 4> &X,
     return X.slice(off, ext);
 }
 
-} // namespace manifold::Utils
+inline Eigen::MatrixXd chip_to_matrix(const Eigen::Tensor<double, 3> &tensor,
+                                      Eigen::Index dim, Eigen::Index off) {
+    Eigen::Tensor<double, 2> slice = tensor.chip(off, dim);
+
+    Eigen::MatrixXd mat(slice.dimension(0), slice.dimension(1));
+    for (Eigen::Index i = 0; i < slice.dimension(0); ++i) {
+        for (Eigen::Index j = 0; j < slice.dimension(1); ++j) {
+            mat(i, j) = slice(i, j);
+        }
+    }
+    return mat;
+}
+
+} // namespace manifold::AI::Utils

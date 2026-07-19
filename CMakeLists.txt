@@ -85,6 +85,7 @@ endif()
 add_library(manifold_electrical STATIC
     src/electrical/elements/capacitor.cpp
     src/electrical/elements/current_source.cpp
+    src/electrical/elements/diode.cpp
     src/electrical/elements/inductor.cpp
     src/electrical/elements/op_amp.cpp
     src/electrical/elements/resistor.cpp
@@ -125,9 +126,10 @@ add_library(manifold_renderer STATIC
     src/renderer/plot_widget.cpp
     src/renderer/annotation_visuals.cpp
     src/renderer/constraint_visuals.cpp
+    src/renderer/circuit_visuals.cpp
 )
 target_include_directories(manifold_renderer PUBLIC include)
-target_link_libraries(manifold_renderer PUBLIC raylib manifold_solver Eigen3::Eigen)
+target_link_libraries(manifold_renderer PUBLIC raylib manifold_solver manifold_electrical Eigen3::Eigen)
 
 # ---- demos & tests ----
 add_subdirectory(demos)

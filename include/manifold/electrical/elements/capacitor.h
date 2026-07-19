@@ -5,7 +5,7 @@
 #include <manifold/electrical/circuit_element.h>
 
 namespace manifold::Electrical {
-class Capacitor : public Element {
+struct Capacitor : public Element {
     int m_a, m_b;
     double m_c; // C
 

@@ -7,23 +7,19 @@
 #include <cmath>
 #include <vector>
 
-// optional, explicitly-driven contact handling. detection produces Contacts,
-// the Resolver consumes them. Contact is the stable interface between the two:
-// add new Surface/Collider types to extend detection without touching the
-// resolver, and body-vs-body works by leaving one side null (static world) or
-// pointing it at a second body.
 namespace manifold::Solver::Collision {
 using namespace Eigen;
 
-// one resolved contact point. b == nullptr => static/world side.
-// normal is unit, world-space, and points out of the surface toward a.
+// one resolved contact point. b == nullptr => static/world side
+// normal is unit, world-space, and points out of the surface toward a
 struct Contact {
     RigidBody *a = nullptr;
     RigidBody *b = nullptr;
     Vector2d point = Vector2d::Zero();
     Vector2d normal = Vector2d::Zero();
-    double depth = 0.0;                    // penetration, >= 0
-    Vector2d v_other = Vector2d::Zero();   // material velocity of the b side when b == nullptr
+    double depth = 0.0; // penetration, >= 0
+    Vector2d v_other =
+        Vector2d::Zero(); // material velocity of the b side when b == nullptr
 };
 
 // a static (or externally-posed) collision surface, given as a signed distance.
@@ -31,7 +27,9 @@ struct Contact {
 struct Surface {
     virtual ~Surface() = default;
     virtual double distance(const Vector2d &x) const = 0;
-    virtual Vector2d velocity(const Vector2d &) const { return Vector2d::Zero(); }
+    virtual Vector2d velocity(const Vector2d &) const {
+        return Vector2d::Zero();
+    }
 
     // gradient of the SDF by central differences; override for exact normals
     virtual Vector2d normal(const Vector2d &x) const {
@@ -88,17 +86,13 @@ inline void collide(const PolygonCollider &c, const Surface &s,
 }
 
 struct ResolverConfig {
-    double restitution = 0.0;  // 0 = no bounce (landing)
-    double friction = 0.6;     // coulomb coefficient
-    double correction = 0.8;   // fraction of penetration removed per step
-    double slop = 1e-3;        // penetration allowed before correction
-    int iterations = 8;        // velocity passes
+    double restitution = 0.0; // 0 = no bounce (landing)
+    double friction = 0.6;    // coulomb coefficient
+    double correction = 0.8;  // fraction of penetration removed per step
+    double slop = 1e-3;       // penetration allowed before correction
+    int iterations = 8;       // velocity passes
 };
 
-// sequential-impulse contact solver. operates in place on the bodies' state and
-// is agnostic to where contacts came from. velocity and position are solved in
-// separate passes: impulses handle restitution + friction, a geometric
-// projection removes penetration (so position correction adds no energy).
 struct Resolver {
     ResolverConfig cfg;
 
@@ -153,7 +147,8 @@ struct Resolver {
             }
         };
 
-        // normal impulse (restitution only; penetration handled in position pass)
+        // normal impulse (restitution only; penetration handled in position
+        // pass)
         const double k_n = eff_mass(im_a, iI_a, im_b, iI_b, ra, rb, n);
         if (k_n <= 0.0)
             return;

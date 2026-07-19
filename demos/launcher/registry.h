@@ -8,6 +8,7 @@
 #include "../cae2_karman_demo.h"
 #include "../cae_karman_demo.h"
 #include "../cart_pendulum_demo.h"
+#include "../circuit_demo.h"
 #include "../crank_slider.h"
 #include "../cube_demo.h"
 #include "../diffuser_demo.h"
@@ -26,6 +27,7 @@
 #include "../pod_karman_demo.h"
 #include "../rocket_landing_demo.h"
 #include "../radial_engine_demo.h"
+#include "../showcase2_demo.h"
 #include "../solar_system_demo.h"
 #include "../spring_demo.h"
 #include "../string_art.h"
@@ -47,6 +49,11 @@ inline void populate_registry(DemoRegistry &registry) {
     registry.add<Demo::SpringDemo>(
         "spring", "Spring Oscillator", "Oscillators",
         "Mass-spring system with energy conservation tracking");
+
+    registry.add<Demo::CircuitDemo>(
+        "circuit", "RC Circuit", "Electrical",
+        "Live MNA circuit solver: driven RC low-pass on a scope, plus a "
+        "gallery of every element glyph");
 
     registry.add<Demo::CartPendulumDemo>(
         "cart_pendulum", "Cart-Pendulum PID", "Control",
@@ -164,6 +171,11 @@ inline void populate_registry(DemoRegistry &registry) {
     registry.add<Demo::InfoDemo>(
         "info", "manifold — Showcase", "Sandbox",
         "Portrait title card: wordmark + live flutter, crank, and pendulum");
+
+    registry.add<Demo::Showcase2Demo>(
+        "reel", "manifold — Reel", "Sandbox",
+        "Scripted 9:16 announcement reel: camera pans a column of live sims "
+        "(coupled flutter, radial engine, crank, pendulum) with titles");
 }
 
 } // namespace manifold::App

@@ -1,4 +1,5 @@
 #include <format>
+#include <iostream>
 #include <ranges>
 #include <stdexcept>
 
@@ -18,7 +19,8 @@ void CircuitSystem::compile() {
     for (Element *e : m_elements) {
         ids.clear();
         e->nodes(ids);
-        max_node_id = std::max(max_node_id, std::ranges::max(ids));
+        if (!ids.empty())
+            max_node_id = std::max(max_node_id, std::ranges::max(ids));
     }
 
     m_state.num_nodes = max_node_id + 1;
@@ -55,6 +57,9 @@ void CircuitSystem::compile() {
     // const MatrixXd lhs = m_state.C + m_h * m_state.G;
     // m_lhs_lu.compute(lhs);
 
+    m_G_static = m_state.G;
+    m_C_static = m_state.C;
+
     m_compiled = true;
 }
 
@@ -85,15 +90,57 @@ void CircuitSystem::process(double dt) {
 }
 
 void CircuitSystem::step() {
-    m_state.t += m_h;
-    update_rhs(m_state.t); // b at new time
 
-    // rhs of the backwards euler formulation for
-    // (C + h*G)*x_{n+1} = C*x_n + h*b
-    const MatrixXd rhs = m_state.C * m_state.x + m_h * m_state.b;
-    VectorXd x_next = m_lhs_lu.solve(rhs);
+    const double t_next = m_state.t + m_h;
+    // previous converged solution
+    const VectorXd x_old = m_state.x;
+
+    // initial newton guess is prev solution
+    VectorXd x_guess = x_old;
+
+    constexpr int max_iters = 50;
+    const double tol = 1e-9;
+
+    for (int iter = 0; iter < max_iters; ++iter) {
+        // rebuild working matrices from static linear part
+        m_state.G = m_G_static;
+        m_state.C = m_C_static;
+        m_state.b.setZero();
+
+        // time-varying independent sources
+        for (Element *e : m_elements) {
+            e->stamp_rhs(m_assembler, t_next);
+        }
+
+        // nonlinear elements linearized about current guess
+        for (Element *e : m_elements) {
+            e->stamp_nonlinear(m_assembler, x_guess);
+        }
+
+        // backward euler
+        // (C + hG) x_{n+1} = C x_n + h b
+        const MatrixXd lhs = m_state.C + m_h * m_state.G;
+        const VectorXd rhs = m_state.C * x_old + m_h * m_state.b;
+
+        Eigen::PartialPivLU<MatrixXd> lu(lhs);
+        const VectorXd x_next = lu.solve(rhs);
+
+        const double err = (x_next - x_guess).lpNorm<Eigen::Infinity>();
+        x_guess = x_next;
+
+        if (err < tol) {
+            m_state.x_prev = m_state.x;
+            m_state.x = x_next;
+            m_state.t = t_next;
+            return;
+        }
+    }
+
+    // keeps best effort
+    std::cout << "newton didn't converge" << std::endl;
     m_state.x_prev = m_state.x;
-    m_state.x = x_next;
+    m_state.x = x_guess;
+    m_state.t = t_next;
 }
 
 void CircuitSystem::update_rhs(double t) {
