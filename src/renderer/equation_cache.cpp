@@ -30,13 +30,13 @@ int EquationCache::width(const std::string &name, int target_h) {
 }
 
 int EquationCache::draw(Renderer *r, const std::string &name, int x, int y,
-                        int target_h) {
+                        int target_h, Color tint) {
     const Texture2D *t = get(name);
     if (!t)
         return 0;
     const int w = (int)((double)target_h * t->width / t->height);
     LayerScope ls(r, Layer::Text);
-    r->draw_texture(t->id, t->width, t->height, x, y, w, target_h, false);
+    r->draw_texture(t->id, t->width, t->height, x, y, w, target_h, false, tint);
     return w;
 }
 

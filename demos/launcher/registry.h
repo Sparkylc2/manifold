@@ -11,9 +11,12 @@
 #include "../circuit_demo.h"
 #include "../crank_slider.h"
 #include "../cube_demo.h"
+#include "../deformation_jacobian_demo.h"
 #include "../diffuser_demo.h"
 #include "../double_pendulum_demo.h"
 #include "../engine_demo.h"
+#include "../esn_karman_demo.h"
+#include "../fea_flutter_demo.h"
 #include "../fluid_demo.h"
 #include "../flutter_demo.h"
 #include "../graphics_test_demo.h"
@@ -22,11 +25,12 @@
 #include "../jansen_demo.h"
 #include "../karman_demo.h"
 #include "../nbody_demo.h"
+#include "../nozzle_demo.h"
 #include "../pde_demo.h"
 #include "../pendulum_demo.h"
 #include "../pod_karman_demo.h"
-#include "../rocket_landing_demo.h"
 #include "../radial_engine_demo.h"
+#include "../rocket_landing_demo.h"
 #include "../showcase2_demo.h"
 #include "../solar_system_demo.h"
 #include "../spring_demo.h"
@@ -97,8 +101,10 @@ inline void populate_registry(DemoRegistry &registry) {
 
     registry.add<Demo::RocketLandingDemo>(
         "rocket_landing", "Rocket Landing", "Fluids",
-        "Self-landing rocket in a tall still-air domain: gimballed thrust-vector "
-        "control + phased PD guidance, exhaust dye one-way coupled, lands on the "
+        "Self-landing rocket in a tall still-air domain: gimballed "
+        "thrust-vector "
+        "control + phased PD guidance, exhaust dye one-way coupled, lands on "
+        "the "
         "pad via the optional collision resolver");
 
     registry.add<Demo::KarmanDemo>("karman", "Karman Vortex", "Fluids",
@@ -120,6 +126,13 @@ inline void populate_registry(DemoRegistry &registry) {
         "POD-reduced autoencoder trained live: untrained net reconstructs "
         "garbage, sharpens as it trains; node-value network diagram");
 
+    registry.add<Demo::ESNKarmanDemo>(
+        "karman_esn", "Karman ESN", "Fluids",
+        "Coarse autoencoder latent forecast by an echo state network: freezes "
+        "the flow, rolls the reduced state ahead closed-loop in real time, "
+        "then "
+        "lets reality catch up");
+
     registry.add<Demo::CAE2KarmanDemo>(
         "karman_cae2", "Karman CAE (conv)", "Fluids",
         "Convolutional autoencoder trained live on a background thread: "
@@ -130,6 +143,11 @@ inline void populate_registry(DemoRegistry &registry) {
         "NACA aerofoil on plunge + torsional springs in a flow (penalization); "
         "drag it, watch it flutter");
 
+    registry.add<Demo::FeaFlutterDemo>(
+        "fea_flutter", "FEA Flutter", "Fluids",
+        "flexible cantilever in cross flow, coloured by von Mises stress; "
+        "[T] toggles two-way FSI against a cylinder-driven wake");
+
     registry.add<Demo::AerofoilElevatorDemo>(
         "aerofoil_elevator", "Aerofoil + Elevator", "Fluids",
         "Flutter foil with a hinged elevator (revolute joint); Up/Down deflect "
@@ -139,6 +157,11 @@ inline void populate_registry(DemoRegistry &registry) {
         "supersonic", "Supersonic Wedge", "Fluids",
         "Live 2D compressible Euler (HLL); oblique shock off a wedge, "
         "schlieren view");
+
+    registry.add<Demo::NozzleDemo>(
+        "nozzle", "Nozzle Plume", "Fluids",
+        "Axisymmetric compressible Euler (HLLC + MUSCL); round exhaust jet with "
+        "a shock-diamond train and Mach disk; adjust chamber/ambient pressure");
 
     registry.add<Demo::DiffuserDemo>(
         "diffuser", "Supersonic Diffuser", "Fluids",
@@ -176,6 +199,11 @@ inline void populate_registry(DemoRegistry &registry) {
         "reel", "manifold — Reel", "Sandbox",
         "Scripted 9:16 announcement reel: camera pans a column of live sims "
         "(coupled flutter, radial engine, crank, pendulum) with titles");
+
+    registry.add<Demo::DeformationJacobianDemo>(
+        "deformation", "Deformation Jacobian", "Sandbox",
+        "arst"
+        "art");
 }
 
 } // namespace manifold::App

@@ -67,7 +67,8 @@ My goal with this project was to understand the way implementations look, and no
 - [Toro, Riemann Solvers and Numerical Methods for Fluid Dynamics: A Practical Introduction](https://link.springer.com/book/10.1007/b79761)
 - [Fedkiw, Stam & Jensen, *Visual Simulation of Smoke* (SIGGRAPH 2001)](https://web.stanford.edu/class/cs237d/smoke.pdf) 
 - [Angot, Bruneau & Fabrie, *A penalization method to take into account obstacles in incompressible viscous flows* (Numer. Math. 1999)](https://link.springer.com/article/10.1007/s002110050401) 
-- Hill & Peterson, *Mechanics and Thermodynamics of Propulsion* — component efficiencies, turbine work balance
+- [Mueller et al., *Stable Real-Time Deformations*](https://graphics.cs.yale.edu/sites/default/files/deform.pdf)
+- [Mueller et al., *Real Time Physics Class Notes*](https://matthias-research.github.io/pages/publications/realtimeCoursenotes.pdf)
 
 ## License
 

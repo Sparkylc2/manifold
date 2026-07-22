@@ -1,9 +1,11 @@
 #pragma once
 #include <Eigen/Core>
+#include <manifold/ai/archive.h>
 #include <manifold/ai/dense_layer.h>
 #include <manifold/ai/reduced_model.h>
 
 #include <random>
+#include <string>
 #include <vector>
 
 namespace manifold::AI {
@@ -34,6 +36,11 @@ class Autoencoder : public ReducedModel {
     VectorXd encode(const VectorXd &x) const override;
     VectorXd decode(const VectorXd &z) const override;
     int latent_dim() const override { return m_latent; }
+
+    // checkpoint weights; build(...) with the same architecture before load()
+    void serialize(Archive &ar);
+    void save(const std::string &path);
+    void load(const std::string &path);
 
     // per-layer node values for the current input, for visualization:
     // [ normalized input, encoder activations..., decoder activations... ]

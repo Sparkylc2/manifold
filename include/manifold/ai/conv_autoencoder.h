@@ -1,11 +1,13 @@
 #pragma once
 #include <Eigen/Core>
+#include <manifold/ai/archive.h>
 #include <manifold/ai/layer.h>
 #include <manifold/ai/reduced_model.h>
 #include <manifold/fluid/field_2d.h>
 #include <unsupported/Eigen/CXX11/Tensor>
 
 #include <random>
+#include <string>
 #include <vector>
 
 namespace manifold::AI {
@@ -34,6 +36,11 @@ class ConvolutionalAutoencoder : public ReducedModel {
     MatrixXd decode(const MatrixXd &Z) const override;
 
     int latent_dim() const override { return m_latent; }
+
+    // checkpoint weights; build(...) with the same architecture before load()
+    void serialize(Archive &ar);
+    void save(const std::string &path);
+    void load(const std::string &path);
 
     const std::vector<double> &loss_history() const { return m_loss_history; }
     int train_steps() const { return m_step; }

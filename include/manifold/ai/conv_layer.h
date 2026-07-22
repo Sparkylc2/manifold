@@ -56,6 +56,8 @@ struct ConvolutionalLayer : public Layer {
 
     void adam_step(double lr, int t) override;
 
+    void serialize(Archive &ar) override;
+
     // --- helpers for forward and backward ---
     // convolution, padded-large -> small (out channels = K.dimension(3))
     Tensor<double, 3> gather(const Tensor<double, 3> &large_n,

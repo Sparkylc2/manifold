@@ -53,6 +53,10 @@ class RaylibRenderer : public Renderer {
     void draw_triangle(double x0, double y0, double x1, double y1, double x2,
                        double y2, Color color) override;
 
+    void draw_triangle_gradient(double x0, double y0, Color c0, double x1,
+                                double y1, Color c1, double x2, double y2,
+                                Color c2) override;
+
     void draw_grid(double spacing, double extent, Color line_color,
                    Color axis_color) override;
 
@@ -73,7 +77,8 @@ class RaylibRenderer : public Renderer {
     void draw_screen_rect(int x, int y, int w, int h, Color color) override;
 
     void draw_texture(unsigned int tex_id, int tex_w, int tex_h, int dst_x,
-                      int dst_y, int dst_w, int dst_h, bool flip_v) override;
+                      int dst_y, int dst_w, int dst_h, bool flip_v,
+                      Color tint = Color::hex(0xFFFFFFFFu)) override;
 
     int measure_text(const std::string &text, int font_size) override;
 

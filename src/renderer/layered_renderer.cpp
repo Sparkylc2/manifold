@@ -101,6 +101,15 @@ void LayeredRenderer::draw_triangle(double x0, double y0, double x1, double y1,
     push(resolve(Layer::Content), c);
 }
 
+void LayeredRenderer::draw_triangle_gradient(double x0, double y0, Color c0,
+                                             double x1, double y1, Color c1,
+                                             double x2, double y2, Color c2) {
+    Cmd c{Op::TriGrad};
+    c.a = x0, c.b = y0, c.c = x1, c.d = y1, c.e = x2, c.f = y2;
+    c.col = c0, c.col2 = c1, c.col3 = c2;
+    push(resolve(Layer::Content), c);
+}
+
 void LayeredRenderer::draw_grid(double spacing, double extent, Color line_color,
                                 Color axis_color) {
     Cmd c{Op::Grid};
@@ -145,10 +154,11 @@ void LayeredRenderer::draw_screen_rect(int x, int y, int w, int h,
 
 void LayeredRenderer::draw_texture(unsigned int tex_id, int tex_w, int tex_h,
                                    int dst_x, int dst_y, int dst_w, int dst_h,
-                                   bool flip_v) {
+                                   bool flip_v, Color tint) {
     Cmd c{Op::TexQuad};
     c.i0 = (int)tex_id, c.i1 = tex_w, c.i2 = tex_h, c.i3 = flip_v ? 1 : 0;
     c.a = dst_x, c.b = dst_y, c.c = dst_w, c.d = dst_h;
+    c.col = tint;
     push(resolve(Layer::Content), c);
 }
 
@@ -269,6 +279,10 @@ void LayeredRenderer::execute(const Cmd &c) {
     case Op::Tri:
         m_inner->draw_triangle(c.a, c.b, c.c, c.d, c.e, c.f, c.col);
         break;
+    case Op::TriGrad:
+        m_inner->draw_triangle_gradient(c.a, c.b, c.col, c.c, c.d, c.col2, c.e,
+                                        c.f, c.col3);
+        break;
     case Op::Grid:
         m_inner->draw_grid(c.a, c.b, c.col, c.col2);
         break;
@@ -290,7 +304,7 @@ void LayeredRenderer::execute(const Cmd &c) {
         break;
     case Op::TexQuad:
         m_inner->draw_texture((unsigned int)c.i0, c.i1, c.i2, (int)c.a,
-                              (int)c.b, (int)c.c, (int)c.d, c.i3 != 0);
+                              (int)c.b, (int)c.c, (int)c.d, c.i3 != 0, c.col);
         break;
     }
 }

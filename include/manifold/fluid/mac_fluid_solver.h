@@ -866,6 +866,13 @@ class MACFluidSolver : public FluidSolver {
         return sample(m_dens, gx - 0.5, gy - 0.5, interp);
     }
 
+    double pressure_at(const Vector2d &x,
+                       Interp interp = Interp::Linear) const override {
+        const double gx = (x.x() - m_origin.x()) / m_h;
+        const double gy = (x.y() - m_origin.y()) / m_h;
+        return sample(m_p, gx - 0.5, gy - 0.5, interp);
+    }
+
     // demo/coupling helpers
     int nx() const { return (int)m_nx; }
     int ny() const { return (int)m_ny; }

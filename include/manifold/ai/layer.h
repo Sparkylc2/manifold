@@ -1,14 +1,20 @@
 #pragma once
 #include <Eigen/Core>
+#include <manifold/ai/archive.h>
 
 namespace manifold::AI {
 using namespace Eigen;
+
+struct Archive;
 
 enum class Act { Tanh, ReLU, Linear };
 
 struct Layer {
     // needs a virtual dtor so deletion is safe
     virtual ~Layer() = default;
+
+    // (de)serialize trainable state; default no-op for parameter-free layers
+    virtual void serialize(Archive &) {}
 
     //  computes forward pass (and should cache whats needed for backprop)
     virtual MatrixXd forward(const MatrixXd &X) = 0;

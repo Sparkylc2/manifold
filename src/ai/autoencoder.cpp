@@ -147,4 +147,22 @@ double Autoencoder::train_step(const MatrixXd &T, double lr) {
     return loss;
 }
 
+void Autoencoder::serialize(Archive &ar) {
+    ar("mu", m_mu);
+    ar("sd", m_sd);
+    ar("latent", m_latent);
+    for (DenseLayer &L : m_enc)
+        L.serialize(ar);
+    for (DenseLayer &L : m_dec)
+        L.serialize(ar);
+}
+void Autoencoder::save(const std::string &path) {
+    SaveArchive ar(path);
+    serialize(ar);
+}
+void Autoencoder::load(const std::string &path) {
+    LoadArchive ar(path);
+    serialize(ar);
+}
+
 } // namespace manifold::AI

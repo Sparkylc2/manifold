@@ -63,6 +63,7 @@ target_link_libraries(manifold_fluid INTERFACE Eigen3::Eigen)
 
 # ---- ai ----
 add_library(manifold_ai STATIC
+    src/ai/archive.cpp
     src/ai/autoencoder.cpp
     src/ai/dense_layer.cpp
     src/ai/conv_layer.cpp
@@ -95,9 +96,21 @@ add_library(manifold_electrical STATIC
 )
 target_include_directories(manifold_electrical PUBLIC include)
 target_link_libraries(manifold_electrical PUBLIC Eigen3::Eigen )
-if(OpenMP_CXX_FOUND)
-    target_link_libraries(manifold_ai PUBLIC OpenMP::OpenMP_CXX)
-endif()
+# ---- fea ----
+add_library(manifold_fea STATIC
+    src/fea/mesh.cpp
+    src/fea/boundary.cpp
+    src/fea/assembler.cpp
+    src/fea/fea_solver.cpp
+    src/fea/elements/cst_elastic.cpp
+    src/fea/elements/quad_elastic.cpp
+    src/fea/elements/tri_thermal.cpp
+    src/fea/integrators/newmark.cpp
+    src/fea/integrators/backward_euler.cpp
+)
+target_include_directories(manifold_fea PUBLIC include)
+target_link_libraries(manifold_fea PUBLIC Eigen3::Eigen manifold_solver)
+
 
 
 
@@ -118,6 +131,7 @@ add_library(manifold_renderer STATIC
     src/renderer/camera_controller.cpp
     src/renderer/hud_panel.cpp
     src/renderer/scene3d.cpp
+    src/renderer/plot3d.cpp
     src/renderer/field_view.cpp
     src/renderer/texture_view.cpp
     src/renderer/equation_cache.cpp
@@ -133,6 +147,11 @@ target_link_libraries(manifold_renderer PUBLIC raylib manifold_solver manifold_e
 
 # ---- demos & tests ----
 add_subdirectory(demos)
+
+# ---- headless trainers ----
+add_executable(train_esn_demo tools/train_esn_demo.cpp)
+target_link_libraries(train_esn_demo PRIVATE manifold_ai manifold_fluid)
+target_include_directories(train_esn_demo PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 # ---- profiling ----
 add_subdirectory(src/profiling)

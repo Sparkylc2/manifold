@@ -4,8 +4,6 @@
 namespace manifold::AI {
 using namespace Eigen;
 
-// ---- Dense ----
-
 void DenseLayer::init(int in, int out, Act a, std::mt19937 &rng) {
     act = a;
     W.resize(out, in);
@@ -53,6 +51,18 @@ void DenseLayer::adam_step(double lr, int t) {
     VectorXd mb_h = mb.array() / (1 - std::pow(b1, t));
     VectorXd vb_h = vb.array() / (1 - std::pow(b2, t));
     b -= (lr * mb_h.array() / (vb_h.array().sqrt() + eps)).matrix();
+}
+
+void DenseLayer::serialize(Archive &ar) {
+    int a = (int)act;
+    ar("act", a);
+    act = (Act)a;
+    ar("W", W);
+    ar("b", b);
+    ar("mW", mW);
+    ar("vW", vW);
+    ar("mb", mb);
+    ar("vb", vb);
 }
 
 } // namespace manifold::AI

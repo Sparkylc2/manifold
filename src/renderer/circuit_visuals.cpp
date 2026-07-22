@@ -55,10 +55,10 @@ static void route(Renderer *r, const CircuitSchematic &sch, const Wire &w,
         line(r, pa, a1, th, col);
     if (hasB)
         line(r, pb, b1, th, col);
-    const Vector2d ax = hasA ? da : (hasB ? db : Vector2d(1, 0));
-    const bool horiz = std::abs(ax.x()) > std::abs(ax.y());
+    // turn along the axis with the larger gap first
+    const double gx = std::abs(b1.x() - a1.x()), gy = std::abs(b1.y() - a1.y());
     const Vector2d corner =
-        horiz ? Vector2d(a1.x(), b1.y()) : Vector2d(b1.x(), a1.y());
+        (gx > gy) ? Vector2d(b1.x(), a1.y()) : Vector2d(a1.x(), b1.y());
     line(r, a1, corner, th, col);
     line(r, corner, b1, th, col);
 }
@@ -176,9 +176,9 @@ void draw_op_amp(Renderer *r, const Vector2d &in_p, const Vector2d &in_n,
     line(r, in_n, bot, s.body_thick, s.body);
     line(r, apex, out, s.body_thick, s.body);
 
-    const double m = hp * 0.28;
-    const Vector2d cp = top - pp * (hp * 0.45) + u * (0.14 * Lax);
-    const Vector2d cm = bot + pp * (hp * 0.45) + u * (0.14 * Lax);
+    const double m = hp * 0.2;
+    const Vector2d cp = top - pp * (hp * 0.59) + u * (0.14 * Lax);
+    const Vector2d cm = bot + pp * (hp * 0.59) + u * (0.14 * Lax);
     line(r, cp - u * m, cp + u * m, s.body_thick, s.mark);
     line(r, cp - pp * m, cp + pp * m, s.body_thick, s.mark);
     line(r, cm - pp * m, cm + pp * m, s.body_thick, s.mark);
@@ -261,8 +261,8 @@ Color voltage_ramp(double v, double vmax) {
 }
 
 // electrical node behind a wire end (waypoint id, or pin's element node)
-static void end_nodes(const CircuitSchematic &sch, const WireEnd &e,
-                      int *out, int &n) {
+static void end_nodes(const CircuitSchematic &sch, const WireEnd &e, int *out,
+                      int &n) {
     if (e.kind == EndKind::Node) {
         out[n++] = sch.waypoints[e.node].node;
         return;

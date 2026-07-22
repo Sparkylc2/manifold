@@ -35,6 +35,8 @@ struct DenseLayer : public Layer {
 
     void adam_step(double lr, int t) override;
     // sigma / sigma_grad are inherited from Layer
+
+    void serialize(Archive &ar) override;
 };
 
 } // namespace manifold::AI

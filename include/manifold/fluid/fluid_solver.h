@@ -62,6 +62,14 @@ class FluidSolver {
         return 0.0;
     }
 
+    // cell-centred pressure, for surface tractions on a deformable body
+    virtual double pressure_at(const Vector2d &x,
+                               Interp interp = Interp::Linear) const {
+        (void)x;
+        (void)interp;
+        return 0.0;
+    }
+
     // world point -> cell indices
     virtual bool world_to_cell(const Vector2d &w, int *i, int *j) const {
         (void)w;

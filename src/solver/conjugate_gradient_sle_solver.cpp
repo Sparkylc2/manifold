@@ -47,7 +47,13 @@ bool ConjugateGradientSLESolver::solve(SparseMatrix<double> &J, VectorXd &W,
         multiply(J, W, m_p, &m_Ap);
 
         const double rk_mag = m_r.squaredNorm();
-        const double alpha = rk_mag / m_p.dot(m_Ap);
+        const double denom = m_p.dot(m_Ap);
+
+        if (std::abs(denom) < m_min_err) {
+            *result = m_x;
+            return false;
+        }
+        const double alpha = rk_mag / denom;
 
         m_x += alpha * m_p;
         m_r -= alpha * m_Ap;
@@ -65,6 +71,7 @@ bool ConjugateGradientSLESolver::solve(SparseMatrix<double> &J, VectorXd &W,
         m_p += m_r;
     }
 
+    *result = m_x;
     return false;
 }
 

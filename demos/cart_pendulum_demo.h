@@ -1,5 +1,6 @@
 #pragma once
 
+#include "manifold/solver/forces/impulse.h"
 #include "manifold/solver/forces/uniform_gravity.h"
 #include <manifold/control/pid.h>
 #include <manifold/renderer/constraint_visuals.h>
@@ -31,6 +32,8 @@ class CartPendulumDemo : public DemoBase {
     static constexpr double PendulumWidth = 0.12;
     static constexpr double Gravity = 9.81;
     static constexpr int SimSteps = 100;
+
+    static constexpr double KickForce = -135.0;
 
     enum class TunerTarget { Angle, Position };
     enum class TunerParam { Kp, Ki, Kd };
@@ -86,6 +89,9 @@ class CartPendulumDemo : public DemoBase {
         m_control_force.set_body(&m_cart);
         m_system.add_force_generator(&m_control_force);
 
+        m_kick.set_body(&m_pendulum);
+        m_system.add_force_generator(&m_kick);
+
         apply_gains();
 
         m_plot_angle.configure("Angle (deg)", Rendering::palette::accent2(),
@@ -116,6 +122,7 @@ class CartPendulumDemo : public DemoBase {
         m_last_force = force;
 
         m_system.process(dt, SimSteps);
+        m_kick.disarm();
 
         double ke = m_cart.energy() + m_pendulum.energy();
         double pe = m_pendulum.m * Gravity * m_pendulum.p.y() +
@@ -175,8 +182,14 @@ class CartPendulumDemo : public DemoBase {
     void on_input(Rendering::Renderer *r) override {
         if (r->is_key_pressed(Rendering::keys::R))
             initialize();
-        if (r->is_key_pressed(Rendering::keys::Space))
-            m_pendulum.v_theta += 2.0;
+        if (r->is_key_pressed(Rendering::keys::Space)) {
+            bool rev = r->is_key_down(Rendering::keys::LeftShift) ||
+                       r->is_key_down(Rendering::keys::RightShift);
+            const Vector2d disp = m_pendulum.p - m_cart.p;
+            const double theta = std::atan2(disp.y(), disp.x());
+            Vector2d force_n = {std::cos(theta), std::sin(theta)};
+            m_kick.arm_force(rev ? -KickForce * force_n : KickForce * force_n);
+        }
 
         if (r->is_key_pressed(KEY_TAB)) {
             m_tuner_target = (m_tuner_target == TunerTarget::Angle)
@@ -347,6 +360,7 @@ class CartPendulumDemo : public DemoBase {
     Solver::LinkConstraint m_pivot;
     Solver::UniformGravityForceGenerator m_gravity;
     Solver::DirectForceGenerator m_control_force;
+    Solver::ImpulseForceGenerator m_kick;
 
     Control::PIDController m_pid_angle;
     double m_kp_a = 150.0, m_ki_a = 2.0, m_kd_a = 40.0;

@@ -64,6 +64,19 @@ class Renderer {
                             double thickness, Color color) = 0;
     virtual void draw_triangle(double x0, double y0, double x1, double y1,
                                double x2, double y2, Color color) = 0;
+
+    // per-vertex colour (gouraud) triangle, for smooth scalar fields.
+    // default averages the three colours and falls back to a flat fill
+    virtual void draw_triangle_gradient(double x0, double y0, Color c0,
+                                        double x1, double y1, Color c1,
+                                        double x2, double y2, Color c2) {
+        const Color avg{(unsigned char)((c0.r + c1.r + c2.r) / 3),
+                        (unsigned char)((c0.g + c1.g + c2.g) / 3),
+                        (unsigned char)((c0.b + c1.b + c2.b) / 3),
+                        (unsigned char)((c0.a + c1.a + c2.a) / 3)};
+        draw_triangle(x0, y0, x1, y1, x2, y2, avg);
+    }
+
     virtual void draw_grid(double spacing, double extent, Color line_color,
                            Color axis_color) = 0;
 
@@ -89,9 +102,9 @@ class Renderer {
 
     virtual void draw_texture(unsigned int tex_id, int tex_w, int tex_h,
                               int dst_x, int dst_y, int dst_w, int dst_h,
-                              bool flip_v) {
+                              bool flip_v, Color tint = Color::hex(0xFFFFFFFFu)) {
         (void)tex_id, (void)tex_w, (void)tex_h, (void)dst_x, (void)dst_y;
-        (void)dst_w, (void)dst_h, (void)flip_v;
+        (void)dst_w, (void)dst_h, (void)flip_v, (void)tint;
     }
 
     // rendered width of text in the active font, in pixels

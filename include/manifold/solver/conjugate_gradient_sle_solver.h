@@ -8,8 +8,8 @@ class ConjugateGradientSLESolver : public SLESolver {
     ConjugateGradientSLESolver();
     virtual ~ConjugateGradientSLESolver() = default;
 
-    virtual bool solve(SparseMatrix<double> &J, VectorXd &W, VectorXd &right,
-                       VectorXd *result, VectorXd *previous);
+    bool solve(SparseMatrix<double> &J, VectorXd &W, VectorXd &right,
+               VectorXd *result, VectorXd *previous);
 
     void set_max_iter(int max_iter) { m_max_iter = max_iter; }
     int get_max_iter() const { return m_max_iter; }
@@ -38,8 +38,8 @@ class ConjugateGradientSLESolver : public SLESolver {
     int m_last_n = -1;
     int m_last_n_dof = -1;
 
-    int m_max_iter;
-    double m_max_err;
-    double m_min_err;
+    int m_max_iter = 200;
+    double m_max_err = 1e-6;
+    double m_min_err = 1e-12;
 };
 } // namespace manifold::Solver

@@ -51,6 +51,7 @@ class StableFluidSolver : public FluidSolver {
             rebuild_solid();
         }
 
+        m_last_dt = dt;
         vel_step(dt);
         dens_step(dt);
     }
@@ -98,6 +99,19 @@ class StableFluidSolver : public FluidSolver {
         double cx, cy;
         to_cont(x, &cx, &cy);
         return sample(m_dens, cx, cy, interp);
+    }
+
+    // vel_step ends on project(), so m_u_prev still holds the projection
+    // potential. that potential is (dt/rho)*p, so scale it back to a true
+    // pressure to match what MacFluidSolver reports
+    double pressure_at(const Vector2d &x,
+                       Interp interp = Interp::Linear) const override {
+        if (m_last_dt <= 0.0)
+            return 0.0;
+
+        double cx, cy;
+        to_cont(x, &cx, &cy);
+        return sample(m_u_prev, cx, cy, interp) * m_rho / m_last_dt;
     }
 
     void wrench_on(const SolidBoundary &b, const Vector2d &ref_world,
@@ -205,11 +219,18 @@ class StableFluidSolver : public FluidSolver {
 
         advect(1, m_u, m_u_prev, m_u_prev, m_v_prev, dt);
         advect(2, m_v, m_v_prev, m_u_prev, m_v_prev, dt);
-        penalize(dt);
-        project(m_u, m_v, m_u_prev, m_v_prev);
+
+        // penalize<->project don't commute: a single project after penalize
+        // reintroduces flow through the solid. iterate so the result is both
+        // (nearly) divergence-free and respects the no-through BC
+        for (int it = 0; it < m_solid_iters; it++) {
+            penalize(dt);
+            project(m_u, m_v, m_u_prev, m_v_prev);
+        }
     }
 
     void project(Field2D &u, Field2D &v, Field2D &p, Field2D &div) {
+        const bool sp = m_solid_project && m_has_solid;
 
         for (size_t i = 1; i <= m_nx; i++) {
             for (size_t j = 1; j <= m_ny; j++) {
@@ -220,16 +241,43 @@ class StableFluidSolver : public FluidSolver {
             }
         }
 
+        // no pressure source inside the solid; penalize already set the solid
+        // cell velocities, so the div of the fluid cells next door carries the
+        // prescribed boundary velocity
+        if (sp)
+            for (size_t i = 1; i <= m_nx; i++)
+                for (size_t j = 1; j <= m_ny; j++)
+                    if (solid_cell(i, j))
+                        div(i, j) = 0.0;
+
         set_bnd(0, div);
         set_bnd(0, p);
 
         cg_pressure(p, div); // matrix-free CG instead of gauss-seidel
         set_bnd(0, p);
 
-        for (size_t i = 1; i <= m_nx; i++) {
-            for (size_t j = 1; j <= m_ny; j++) {
-                u(i, j) -= 0.5 / m_h * (p(i + 1, j) - p(i - 1, j));
-                v(i, j) -= 0.5 / m_h * (p(i, j + 1) - p(i, j - 1));
+        if (!sp) {
+            for (size_t i = 1; i <= m_nx; i++) {
+                for (size_t j = 1; j <= m_ny; j++) {
+                    u(i, j) -= 0.5 / m_h * (p(i + 1, j) - p(i - 1, j));
+                    v(i, j) -= 0.5 / m_h * (p(i, j + 1) - p(i, j - 1));
+                }
+            }
+        } else {
+            // no-flux at a solid face: use this cell's own pressure across it, so
+            // the gradient there is zero and no velocity is pushed into the body.
+            // solid cells keep their penalized velocity
+            for (size_t i = 1; i <= m_nx; i++) {
+                for (size_t j = 1; j <= m_ny; j++) {
+                    if (solid_cell(i, j))
+                        continue;
+                    const double pR = solid_cell(i + 1, j) ? p(i, j) : p(i + 1, j);
+                    const double pL = solid_cell(i - 1, j) ? p(i, j) : p(i - 1, j);
+                    const double pU = solid_cell(i, j + 1) ? p(i, j) : p(i, j + 1);
+                    const double pD = solid_cell(i, j - 1) ? p(i, j) : p(i, j - 1);
+                    u(i, j) -= 0.5 / m_h * (pR - pL);
+                    v(i, j) -= 0.5 / m_h * (pU - pD);
+                }
             }
         }
         set_bnd(1, u);
@@ -260,6 +308,13 @@ class StableFluidSolver : public FluidSolver {
         x(m_nx + 1, 0) = 0.5 * (x(m_nx, 0) + x(m_nx + 1, 1));
         x(m_nx + 1, m_ny + 1) = 0.5 * (x(m_nx, m_ny + 1) + x(m_nx + 1, m_ny));
     }
+
+    // number of penalize<->project passes; more = tighter no-through BC
+    void set_solid_iters(int n) { m_solid_iters = std::max(1, n); }
+
+    // cut the solid out of the pressure solve (proper no-through BC). off by
+    // default so existing demos keep the soft-penalization behaviour
+    void set_solid_project(bool on) { m_solid_project = on; }
 
     void set_channel(double inflow_speed) override {
         m_mode = BoundaryMode::Channel;
@@ -411,14 +466,45 @@ class StableFluidSolver : public FluidSolver {
         return m_has_solid ? m_solid(i, j) : 0.0;
     }
 
+    // interior cell mostly inside a solid, used to cut it out of the pressure
+    // system (proper no-through BC instead of soft penalization)
+    bool solid_cell(size_t i, size_t j) const {
+        return m_solid_project && m_has_solid && i >= 1 && i <= m_nx &&
+               j >= 1 && j <= m_ny && m_solid(i, j) > 0.5;
+    }
+
     //  matrix-free CG pressure solve
     void lap_apply(Field2D &Ap, Field2D &p) {
         set_bnd(0, p);
 
+        if (!m_solid_project || !m_has_solid) {
+            for (size_t i = 1; i <= m_nx; i++)
+                for (size_t j = 1; j <= m_ny; j++)
+                    Ap(i, j) = 4.0 * p(i, j) - (p(i - 1, j) + p(i + 1, j) +
+                                                p(i, j - 1) + p(i, j + 1));
+            return;
+        }
+
+        // solid faces are dropped from the stencil (homogeneous Neumann), solid
+        // cells become identity rows so their pressure stays pinned at zero
         for (size_t i = 1; i <= m_nx; i++) {
             for (size_t j = 1; j <= m_ny; j++) {
-                Ap(i, j) = 4.0 * p(i, j) - (p(i - 1, j) + p(i + 1, j) +
-                                            p(i, j - 1) + p(i, j + 1));
+                if (solid_cell(i, j)) {
+                    Ap(i, j) = p(i, j);
+                    continue;
+                }
+                double diag = 0.0, off = 0.0;
+                auto acc = [&](size_t ni, size_t nj) {
+                    if (solid_cell(ni, nj))
+                        return;
+                    diag += 1.0;
+                    off += p(ni, nj);
+                };
+                acc(i - 1, j);
+                acc(i + 1, j);
+                acc(i, j - 1);
+                acc(i, j + 1);
+                Ap(i, j) = diag * p(i, j) - off;
             }
         }
     }
@@ -577,8 +663,11 @@ class StableFluidSolver : public FluidSolver {
     Field2D m_solid_u, m_solid_v; // per-cell solid velocity (no-slip target)
     Field2D m_solid_body;         // index of the owning body per cell (-1 none)
     bool m_has_solid = false;
-    double m_eta = 1e-4; // penalization permeability (
+    int m_solid_iters = 1;        // penalize<->project passes; 1 == original
+    bool m_solid_project = false; // cut solid out of the pressure solve
+    double m_eta = 1e-4;          // penalization permeability (
     double m_rho = 1.0;  // fluid density (scales the reported force)
+    double m_last_dt = 0.0; // needed to rescale the projection potential
     double m_dens_dissipation = 0.0; // dye decay rate (1/s)
 
     Vector2d m_obstacle_force = Vector2d::Zero();

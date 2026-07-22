@@ -20,8 +20,10 @@ class EquationCache {
     EquationCache &operator=(const EquationCache &) = delete;
 
     // draw <name>.png at screen (x, y) top-left, scaled to target_h px tall.
-    // recorded on the Text layer. returns drawn width in px (0 if missing)
-    int draw(Renderer *r, const std::string &name, int x, int y, int target_h);
+    // glyphs are baked white and multiplied by tint. recorded on the Text
+    // layer. returns drawn width in px (0 if missing)
+    int draw(Renderer *r, const std::string &name, int x, int y, int target_h,
+             Color tint = active_theme().foreground);
 
     // px width of <name> at target_h, without drawing (0 if missing)
     int width(const std::string &name, int target_h);

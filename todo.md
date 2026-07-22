@@ -20,3 +20,6 @@ ideas:
 - add self landing rocket
 - show an integrator circuit with op-amps
 - simulate a motor from scratch (ie the electrical physics behind how a motor works)
+- see if we can maybe create an "autopilot" guidance system, simulate a rocket launch with a full state model and do guidance using an atmosphere and space model
+- create a simple 2D FEA solver with coupling
+- simulate convective and conductive heat transfer through an fea to simulate stuff such as a heater, or radiator

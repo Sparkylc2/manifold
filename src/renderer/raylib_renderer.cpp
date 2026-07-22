@@ -261,6 +261,33 @@ void RaylibRenderer::draw_triangle(double x0, double y0, double x1, double y1,
     DrawTriangle(a, c, b, rc);
 }
 
+void RaylibRenderer::draw_triangle_gradient(double x0, double y0, Color c0,
+                                            double x1, double y1, Color c1,
+                                            double x2, double y2, Color c2) {
+    const Vector2 a{w2sx(x0), w2sy(y0)}, b{w2sx(x1), w2sy(y1)},
+        c{w2sx(x2), w2sy(y2)};
+    const ::Color r0 = detail::to_rl(c0), r1 = detail::to_rl(c1),
+                  r2 = detail::to_rl(c2);
+
+    // rlgl per-vertex colour. draw both windings so backface culling keeps
+    // exactly one (the other is dropped, no double blend)
+    rlBegin(RL_TRIANGLES);
+    rlColor4ub(r0.r, r0.g, r0.b, r0.a);
+    rlVertex2f(a.x, a.y);
+    rlColor4ub(r1.r, r1.g, r1.b, r1.a);
+    rlVertex2f(b.x, b.y);
+    rlColor4ub(r2.r, r2.g, r2.b, r2.a);
+    rlVertex2f(c.x, c.y);
+
+    rlColor4ub(r0.r, r0.g, r0.b, r0.a);
+    rlVertex2f(a.x, a.y);
+    rlColor4ub(r2.r, r2.g, r2.b, r2.a);
+    rlVertex2f(c.x, c.y);
+    rlColor4ub(r1.r, r1.g, r1.b, r1.a);
+    rlVertex2f(b.x, b.y);
+    rlEnd();
+}
+
 void RaylibRenderer::draw_grid(double spacing, double extent, Color line_color,
                                Color axis_color) {
     auto lc = detail::to_rl(line_color), ac = detail::to_rl(axis_color);
@@ -337,7 +364,7 @@ void RaylibRenderer::draw_screen_rect(int x, int y, int w, int h, Color color) {
 
 void RaylibRenderer::draw_texture(unsigned int tex_id, int tex_w, int tex_h,
                                   int dst_x, int dst_y, int dst_w, int dst_h,
-                                  bool flip_v) {
+                                  bool flip_v, Color tint) {
     Texture2D t{};
     t.id = tex_id;
     t.width = tex_w;
@@ -347,7 +374,7 @@ void RaylibRenderer::draw_texture(unsigned int tex_id, int tex_w, int tex_h,
     const Rectangle src{0.0f, 0.0f, (float)tex_w,
                         flip_v ? -(float)tex_h : (float)tex_h};
     const Rectangle dst{(float)dst_x, (float)dst_y, (float)dst_w, (float)dst_h};
-    DrawTexturePro(t, src, dst, {0, 0}, 0.0f, ::Color{255, 255, 255, 255});
+    DrawTexturePro(t, src, dst, {0, 0}, 0.0f, detail::to_rl(tint));
 }
 
 int RaylibRenderer::measure_text(const std::string &text, int font_size) {

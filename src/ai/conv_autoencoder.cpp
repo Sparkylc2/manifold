@@ -185,4 +185,22 @@ MatrixXd ConvolutionalAutoencoder::denormalize(const MatrixXd &X) const {
     return out;
 }
 
+void ConvolutionalAutoencoder::serialize(Archive &ar) {
+    ar("mu", m_mu);
+    ar("sd", m_sd);
+    ar("latent", m_latent);
+    for (auto &L : m_enc)
+        L->serialize(ar); // virtual dispatch: Conv or Dense
+    for (auto &L : m_dec)
+        L->serialize(ar);
+}
+void ConvolutionalAutoencoder::save(const std::string &path) {
+    SaveArchive ar(path);
+    serialize(ar);
+}
+void ConvolutionalAutoencoder::load(const std::string &path) {
+    LoadArchive ar(path);
+    serialize(ar);
+}
+
 } // namespace manifold::AI

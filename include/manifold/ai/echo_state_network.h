@@ -4,8 +4,11 @@
 #include <Eigen/Sparse>
 #include <Spectra/GenEigsSolver.h>
 #include <Spectra/MatOp/SparseGenMatProd.h>
+#include <manifold/ai/archive.h>
 #include <manifold/ai/layer.h>
 #include <manifold/ai/utilities.h>
+#include <string>
+#include <numeric>
 #include <random>
 #include <unsupported/Eigen/CXX11/Tensor>
 
@@ -29,12 +32,17 @@ class ESN {
         int N_split = 4; // number of splits to training data
 
         // data config
-        int upsample;           // upsample * dt_model = dt_ESN
-        NormMethod norm_method; // determines what normalization method is used
-        WInType W_in_type;      // determines if Win is sparse or dense
-                                // on the input data
+        int upsample = 5; // upsample * dt_model = dt_ESN
+
+        NormMethod norm_method = // determines what normalization method is used
+            Mean;
+
+        WInType W_in_type = Sparse;    // determines if Win is sparse or dense
+                                       // on the input data
         std::vector<int> observed_idx; // determines what indices of a data
                                        // snapshot are observed
+        // adds randomly distributed noise to the input data
+        bool add_noise = true;
 
         // hyperparameters
         double noise = 1e-10; // noise scale
@@ -69,9 +77,9 @@ class ESN {
             cfg.observed_idx.empty() ? y.rows() : cfg.observed_idx.size();
         m_N_dim = y.rows();
 
-        if (cfg.observed_idx.empty()) {
-            cfg.observed_idx.resize(m_N_dim_in);
-            std::iota(cfg.observed_idx.begin(), cfg.observed_idx.end(), 0);
+        if (m_cfg.observed_idx.empty()) {
+            m_cfg.observed_idx.resize(m_N_dim_in);
+            std::iota(m_cfg.observed_idx.begin(), m_cfg.observed_idx.end(), 0);
         }
 
         m_sparsity = 1.0 - cfg.connected / (m_N_r - 1.0);
@@ -84,7 +92,7 @@ class ESN {
         // with sparsity constraints
 
         // m_n_x + 1 if a bias is added
-        m_W_in.resize(m_N_r, m_N_dim_in);
+        m_W_in.resize(m_N_r, m_N_dim_in + 1);
         m_W.resize(m_N_r, m_N_r);
 
         // one per row with m_N_r rows
@@ -93,7 +101,7 @@ class ESN {
         W_in_t.reserve(m_N_r);
 
         // W_in
-        std::uniform_int_distribution<int> col_dist(0, m_N_dim_in - 1);
+        std::uniform_int_distribution<int> col_dist(0, m_N_dim_in);
         // W
         std::uniform_real_distribution<double> uni_dist(0.0, 1.0);
         // both
@@ -107,7 +115,7 @@ class ESN {
                 const double random_weight = val_dist(m_rng);
                 W_in_t.emplace_back(i, random_col, random_weight);
             } else {
-                for (int j = 0; j < m_N_dim_in; j++) {
+                for (int j = 0; j < m_N_dim_in + 1; j++) {
                     const double random_weight = val_dist(m_rng);
                     W_in_t.emplace_back(i, j, random_weight);
                 }
@@ -145,6 +153,7 @@ class ESN {
                                MatVec &U_test, MatVec &Y_test) {
 
         auto apply_matrix_fn = [&](const MatVec &in, MatVec &out, auto fn) {
+            out.resize(in.size());
             for (int i = 0; i < in.size(); i++) {
                 fn(in[i], out[i]);
             }
@@ -172,6 +181,19 @@ class ESN {
             for (int j = 0; j < m_N_dim_in; j++)
                 U_l.col(j) = Y_l.col(m_cfg.observed_idx[j]);
         });
+
+        if (m_cfg.add_noise) {
+            std::normal_distribution<double> gauss(0.0, 1.0);
+            for (MatrixXd &U_l : U) {
+                RowVectorXd mean = U_l.colwise().mean();
+                RowVectorXd sd =
+                    ((U_l.rowwise() - mean).array().square().colwise().mean())
+                        .sqrt();
+                for (int j = 0; j < U_l.cols(); j++)
+                    for (int i = 0; i < U_l.rows(); i++)
+                        U_l(i, j) += m_cfg.noise * sd(j) * gauss(m_rng);
+            }
+        }
 
         const int L = Y.size();
         const int N_t = Y[0].rows();
@@ -203,7 +225,7 @@ class ESN {
             Y_wtv.push_back(Y[i].block(1, 0, wtv_len, m_N_dim));
 
             U_test.push_back(U[i].block(N_wtv, 0, test_len, m_N_dim_in));
-            Y_test.push_back(Y[i].block(N_wtv + 1, 0, test_len, m_N_dim_in));
+            Y_test.push_back(Y[i].block(N_wtv + 1, 0, test_len, m_N_dim));
         }
 
         set_norm(U_wtv);
@@ -211,9 +233,13 @@ class ESN {
 
     void step(const MatrixXd &x, const MatrixXd &r, MatrixXd &x_out,
               MatrixXd &r_out) {
-        // x is [N_in, N_ensemble], r is (N_r, N_ens)
+        // x is [N_in, 1], r is (N_r, 1) (can be != 1 if we use ensembles)
         MatrixXd x_norm = normalize_input(x);
-        r_out = (m_cfg.sigma_in * m_W_in * x_norm + m_cfg.rho * m_W * r)
+        MatrixXd x_aug(x_norm.rows() + 1, x_norm.cols());
+        x_aug.topRows(x_norm.rows()) = x_norm;
+        x_aug.bottomRows(1).setConstant(m_cfg.bias_in);
+
+        r_out = (m_cfg.sigma_in * m_W_in * x_aug + m_cfg.rho * m_W * r)
                     .array()
                     .tanh()
                     .matrix();
@@ -256,7 +282,7 @@ class ESN {
         split_and_format_data(train_data, U_wtv, Y_wtv, U_test, Y_test);
         generate_W_W_in(m_cfg.seed);
 
-        m_W_out = MatrixXd::Zero(m_N_r, m_N_dim);
+        m_W_out = MatrixXd::Zero(m_N_r + 1, m_N_dim);
         m_W_out = solve_ridge_regression(U_wtv, Y_wtv);
     }
 
@@ -269,12 +295,12 @@ class ESN {
 
     void compute_RR_terms(MatrixXd &LHS, MatrixXd &RHS, const MatVec &U_wtv,
                           const MatVec &Y_wtv) {
-        LHS = MatrixXd::Zero(m_N_r, m_N_r);
-        RHS = MatrixXd::Zero(m_N_r, m_N_dim);
+        // plus 1 for the bias
+        LHS = MatrixXd::Zero(m_N_r + 1, m_N_r + 1);
+        RHS = MatrixXd::Zero(m_N_r + 1, m_N_dim);
 
-        // (this really belongs in train() once you write it)
         if (m_W_out.size() == 0)
-            m_W_out = MatrixXd::Zero(m_N_r, m_N_dim);
+            m_W_out = MatrixXd::Zero(m_N_r + 1, m_N_dim);
 
         for (int l = 0; l < (int)U_wtv.size(); l++) {
             const MatrixXd &U_l = U_wtv[l]; // (wtv_len, N_dim_in)
@@ -306,16 +332,18 @@ class ESN {
 
                 // each split restarts from the post-washout state
                 MatrixXd r_s = r;
-                MatrixXd R_open(chunk, m_N_r);
+                MatrixXd R_aug(chunk, m_N_r + 1);
                 for (int i = 0; i < chunk; i++) {
                     step(U_in.row(row0 + i).transpose(), r_s, x_out, r_out);
                     r_s = r_out;
-                    R_open.row(i) = r_out.transpose(); // (N_r,1) -> row
+                    R_aug.block(i, 0, 1, m_N_r) =
+                        r_out.transpose(); // (N_r,1) -> row
                 }
+                R_aug.col(m_N_r).setConstant(m_cfg.bias_out);
 
                 const MatrixXd Y_t = Y_in.block(row0, 0, chunk, m_N_dim);
-                LHS += R_open.transpose() * R_open; // (N_r, N_r)
-                RHS += R_open.transpose() * Y_t;    // (N_r, N_dim)
+                LHS += R_aug.transpose() * R_aug; // (N_r, N_r)
+                RHS += R_aug.transpose() * Y_t;   // (N_r, N_dim)
                 row0 += chunk;
             }
         }
@@ -335,6 +363,7 @@ class ESN {
         if (m_cfg.norm_method == NormMethod::None) {
             m_norm = VectorXd::Ones(N_dim);
             m_shift = VectorXd::Zero(N_dim);
+            return;
         }
 
         VectorXd shift_accum = VectorXd::Zero(N_dim);
@@ -393,7 +422,10 @@ class ESN {
     }
 
     MatrixXd reservoir_to_physical(const MatrixXd &r) {
-        return m_W_out.transpose() * r;
+        MatrixXd r_aug(r.rows() + 1, r.cols());
+        r_aug.topRows(r.rows()) = r;
+        r_aug.bottomRows(1).setConstant(m_cfg.bias_out);
+        return m_W_out.transpose() * r_aug;
     }
 
     MatrixXd outputs_to_inputs(const MatrixXd &state) {
@@ -407,6 +439,24 @@ class ESN {
 
     MatrixXd normalize_input(const MatrixXd &input) {
         return (input.colwise() - m_shift).array().colwise() / m_norm.array();
+    }
+
+    // checkpoint the trained reservoir; construct with the same cfg before load
+    void serialize(Archive &ar) {
+        ar("W_in", m_W_in);
+        ar("W", m_W);
+        ar("W_out", m_W_out);
+        ar("shift", m_shift);
+        ar("norm", m_norm);
+        ar("r", m_r);
+    }
+    void save(const std::string &path) {
+        SaveArchive a(path);
+        serialize(a);
+    }
+    void load(const std::string &path) {
+        LoadArchive a(path);
+        serialize(a);
     }
 
   private:

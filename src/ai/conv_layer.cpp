@@ -429,10 +429,18 @@ void ConvolutionalLayer::adam_step(double lr, int t) {
     }
 }
 
-//
-//
-//
-
-//
+// geometry (C_in, stride, pad, ...) is set by init() before load; only weights
+// travel in the checkpoint.
+void ConvolutionalLayer::serialize(Archive &ar) {
+    int a = (int)act;
+    ar("act", a);
+    act = (Act)a;
+    ar("K", K);
+    ar("b", b);
+    ar("mK", mK);
+    ar("vK", vK);
+    ar("mb", mb);
+    ar("vb", vb);
+}
 
 } // namespace manifold::AI
