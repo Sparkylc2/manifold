@@ -34,6 +34,8 @@ class StableFluidSolver : public FluidSolver {
         m_v_prev.resize(x, y);
         m_dens.resize(x, y);
         m_dens_prev.resize(x, y);
+        m_temp.resize(x, y);
+        m_temp_prev.resize(x, y);
 
         m_solid.resize(x, y);
         m_solid_u.resize(x, y);
@@ -54,6 +56,7 @@ class StableFluidSolver : public FluidSolver {
         m_last_dt = dt;
         vel_step(dt);
         dens_step(dt);
+        temp_step(dt);
     }
 
     void add_boundary(const SolidBoundary *b) override {
@@ -199,6 +202,23 @@ class StableFluidSolver : public FluidSolver {
         }
     }
 
+    // absolute temperature transport: diffuse (conduction) + advect with the
+    // flow, then relax toward ambient (newton cooling). b == 3 gives the
+    // channel a cold Dirichlet inflow and adiabatic/Neumann elsewhere
+    void temp_step(double dt) {
+        add_source(m_temp, m_temp_prev, dt);
+        m_temp_prev.swap(m_temp);
+        diffuse(3, m_temp, m_temp_prev, m_temp_diff, dt);
+        m_temp_prev.swap(m_temp);
+        advect(3, m_temp, m_temp_prev, m_u, m_v, dt);
+
+        if (m_temp_relax > 0.0) {
+            const double s = 1.0 / (1.0 + dt * m_temp_relax);
+            for (size_t k = 0; k < m_temp.size(); k++)
+                m_temp[k] = m_temp_ambient + (m_temp[k] - m_temp_ambient) * s;
+        }
+    }
+
     void vel_step(double dt) {
         if (m_mode == BoundaryMode::Channel)
             apply_inflow();
@@ -335,6 +355,8 @@ class StableFluidSolver : public FluidSolver {
                 x(0, j) = m_inflow; // u = U_in
             else if (b == 2)
                 x(0, j) = 0.0; // v = 0
+            else if (b == 3)
+                x(0, j) = m_temp_ambient; // cold fluid enters at the inlet
             else
                 x(0, j) = x(1, j); // p: Neumann
             // outflow: zero-gradient for velocity, Dirichlet p=0 for pressure
@@ -583,6 +605,7 @@ class StableFluidSolver : public FluidSolver {
         m_u_prev.zero();
         m_v_prev.zero();
         m_dens_prev.zero();
+        m_temp_prev.zero();
     }
 
     // zero the whole simulation
@@ -593,6 +616,8 @@ class StableFluidSolver : public FluidSolver {
         m_v_prev.zero();
         m_dens.zero();
         m_dens_prev.zero();
+        m_temp.fill(m_temp_ambient);
+        m_temp_prev.zero();
     }
 
     // dye decay rate (1/s); 0 = conserved (default)
@@ -606,6 +631,31 @@ class StableFluidSolver : public FluidSolver {
 
         m_dens_prev(i, j) += amount;
     }
+
+    // heat injection (temperature rate, T/s), applied in temp_step
+    void add_heat_source(int i, int j, double amount) override {
+        if (i < 1 || i > (int)m_nx || j < 1 || j > (int)m_ny) {
+            return;
+        }
+
+        m_temp_prev(i, j) += amount;
+    }
+
+    double temperature_at(const Vector2d &x,
+                          Interp interp = Interp::Linear) const override {
+        double cx, cy;
+        to_cont(x, &cx, &cy);
+        return sample(m_temp, cx, cy, interp);
+    }
+
+    // ambient (far-field) temperature; also (re)fills the field with it
+    void set_ambient_temp(double t) {
+        m_temp_ambient = t;
+        m_temp.fill(t);
+    }
+    void set_temp_diffusion(double d) { m_temp_diff = d; }
+    void set_temp_relaxation(double rate) { m_temp_relax = rate; }
+    double temperature(int i, int j) const { return m_temp(i, j); }
 
     // velocity written straight into the field (not dt-scaled),
     void add_velocity(int i, int j, double vx, double vy) {
@@ -652,6 +702,7 @@ class StableFluidSolver : public FluidSolver {
 
     Field2D m_u, m_u_prev, m_v, m_v_prev;
     Field2D m_dens, m_dens_prev;
+    Field2D m_temp, m_temp_prev; // advected temperature (absolute)
 
     // boundary mode: Closed = walls all round, Channel = inflow/outflow
     enum class BoundaryMode { Closed, Channel };
@@ -669,6 +720,10 @@ class StableFluidSolver : public FluidSolver {
     double m_rho = 1.0;  // fluid density (scales the reported force)
     double m_last_dt = 0.0; // needed to rescale the projection potential
     double m_dens_dissipation = 0.0; // dye decay rate (1/s)
+
+    double m_temp_ambient = 0.0; // far-field temperature
+    double m_temp_diff = 0.0;    // thermal diffusivity (conduction in the fluid)
+    double m_temp_relax = 0.0;   // newton cooling toward ambient (1/s)
 
     Vector2d m_obstacle_force = Vector2d::Zero();
     double m_obstacle_torque = 0.0; // about world origin

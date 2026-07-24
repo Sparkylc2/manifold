@@ -50,6 +50,12 @@ class FluidSolver {
         (void)amount;
     }
 
+    virtual void add_heat_source(int i, int j, double amount) {
+        (void)i;
+        (void)j;
+        (void)amount;
+    }
+
     // interpolated field queries at a world point
     virtual void velocity_at(const Vector2d &x, Vector2d *v, Interp) const {
         velocity_at(x, v);
@@ -57,6 +63,13 @@ class FluidSolver {
 
     virtual double density_at(const Vector2d &x,
                               Interp interp = Interp::Linear) const {
+        (void)x;
+        (void)interp;
+        return 0.0;
+    }
+
+    virtual double temperature_at(const Vector2d &x,
+                                  Interp interp = Interp::Linear) const {
         (void)x;
         (void)interp;
         return 0.0;

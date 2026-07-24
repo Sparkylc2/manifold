@@ -51,6 +51,13 @@ class ElasticBody : public FeaSolver {
 
     void advance(double dt) override;
 
+    void solve_static();
+
+    // relax the displayed deflection toward the static equilibrium with a
+    // damped 2nd-order follow (omega rad/s, zeta damping): a visible bend +
+    // settle without the dynamic solver's stiffness limit
+    void step_relaxed(double dt, double omega, double zeta);
+
     int node_count() const override { return m_mesh.node_count(); }
     Vector2d node_position(int i) const override;
     Vector2d node_velocity(int i) const override;

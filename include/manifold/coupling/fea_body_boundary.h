@@ -9,15 +9,6 @@
 namespace manifold::Coupling {
 using namespace Eigen;
 
-// presents a deformed FEA body to the fluid as a SolidBoundary.
-//
-// the shape is a capsule chain: the caller supplies the node indices along the
-// body's centreline plus a half thickness, and the sdf is the distance to that
-// polyline minus the radius. bending falls out for free
-//
-// this is the two-way path. the fluid re-reads boundaries every advance, so the
-// solid it sees genuinely moves with the structure. weakly coupled though, so a
-// light structure in a dense fluid can hit added-mass instability
 class FeaBodyBoundary : public Fluid::SolidBoundary {
   public:
     FeaBodyBoundary(const FEA::FeaSolver *body, std::vector<int> chain,

@@ -6,11 +6,6 @@
 namespace manifold::Coupling {
 using namespace Eigen;
 
-// hard attachment: an FEA node is pinned to a point on a rigid body (e.g. a cart
-// on a track). each tick the node's Dirichlet target is retargeted to the body
-// point's world position, so cart motion drags the node and stress develops in
-// the connection. use instead of FeaSpringForce when the joint should be rigid.
-//
 // note: this is one-way (body -> node). the node exerts no reaction back on the
 // body here; add a reaction through the force path if the body should feel it.
 class FeaCartAttachment {

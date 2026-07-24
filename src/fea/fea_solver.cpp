@@ -183,6 +183,79 @@ void ElasticBody::advance(double dt) {
         m_mesh.pos(i) = m_mesh.rest(i) + m_state.u.segment<2>(2 * i);
 }
 
+void ElasticBody::solve_static() {
+    if (!m_built)
+        throw std::logic_error("ElasticBody::solve_static before build()");
+
+    const int n = (int)m_state.u.size();
+
+    std::vector<char> fixed((size_t)n, 0);
+    for (int node : m_fixed_node) {
+        fixed[(size_t)(2 * node + 0)] = 1;
+        fixed[(size_t)(2 * node + 1)] = 1;
+    }
+
+    // supports sit at their rest position, so the fixed dofs are u = 0 and the
+    // rhs is just the external load with the fixed rows pinned
+    SparseMatrix<double> K = m_K0;
+    zero_fixed(K, fixed, true);
+    K.makeCompressed();
+
+    VectorXd rhs = m_fext;
+    for (int d = 0; d < n; d++)
+        if (fixed[(size_t)d])
+            rhs(d) = 0.0;
+
+    SimplicialLDLT<SparseMatrix<double>> solver;
+    solver.compute(K);
+    if (solver.info() == Success)
+        m_state.u = solver.solve(rhs);
+
+    m_state.v.setZero();
+    m_state.a.setZero();
+
+    for (int i = 0; i < m_mesh.node_count(); i++)
+        m_mesh.pos(i) = m_mesh.rest(i) + m_state.u.segment<2>(2 * i);
+}
+
+void ElasticBody::step_relaxed(double dt, double omega, double zeta) {
+    if (!m_built)
+        throw std::logic_error("ElasticBody::step_relaxed before build()");
+
+    const int n = (int)m_state.u.size();
+
+    std::vector<char> fixed((size_t)n, 0);
+    for (int node : m_fixed_node) {
+        fixed[(size_t)(2 * node + 0)] = 1;
+        fixed[(size_t)(2 * node + 1)] = 1;
+    }
+
+    SparseMatrix<double> K = m_K0;
+    zero_fixed(K, fixed, true);
+    K.makeCompressed();
+
+    VectorXd rhs = m_fext;
+    for (int d = 0; d < n; d++)
+        if (fixed[(size_t)d])
+            rhs(d) = 0.0;
+
+    SimplicialLDLT<SparseMatrix<double>> solver;
+    solver.compute(K);
+    const VectorXd u_eq =
+        (solver.info() == Success) ? VectorXd(solver.solve(rhs)) : m_state.u;
+
+    // damped 2nd-order follow toward equilibrium (stable for omega*dt < ~1),
+    // so the bar bends in and settles instead of snapping to the solution
+    const VectorXd acc =
+        omega * omega * (u_eq - m_state.u) - 2.0 * zeta * omega * m_state.v;
+    m_state.v += dt * acc;
+    m_state.u += dt * m_state.v;
+    m_state.a = acc;
+
+    for (int i = 0; i < m_mesh.node_count(); i++)
+        m_mesh.pos(i) = m_mesh.rest(i) + m_state.u.segment<2>(2 * i);
+}
+
 Vector2d ElasticBody::node_position(int i) const {
     return m_mesh.rest(i) + m_state.u.segment<2>(2 * i);
 }

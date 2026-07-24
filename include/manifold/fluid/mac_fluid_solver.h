@@ -71,6 +71,7 @@ class MACFluidSolver : public FluidSolver {
         m_vsol.resize(m_nx, m_ny + 1);
 
         m_dens_src.resize(m_nx, m_ny); // per-frame dye injection buffer
+        m_T_src.resize(m_nx, m_ny);    // per-frame heat injection buffer
     }
 
     // optional smoke body forces, advection, no-slip on the bodies,
@@ -85,9 +86,11 @@ class MACFluidSolver : public FluidSolver {
         m_u_prev = m_u;
         m_v_prev = m_v;
         if (m_smoke) {
-            // per-frame dye sources (rate * dt)
-            for (size_t k = 0; k < m_dens.size(); k++)
+            // per-frame dye + heat sources (rate * dt)
+            for (size_t k = 0; k < m_dens.size(); k++) {
                 m_dens[k] += m_dens_src[k] * dt;
+                m_T[k] += m_T_src[k] * dt;
+            }
             m_dens_prev = m_dens;
             m_T_prev = m_T;
         }
@@ -100,6 +103,17 @@ class MACFluidSolver : public FluidSolver {
         if (m_smoke) {
             advect(m_dens, m_dens_prev, m_u, m_v, 0, 0, dt, Interp::Cubic);
             advect(m_T, m_T_prev, m_u, m_v, 0, 0, dt, Interp::Cubic);
+
+            if (m_dens_dissipation > 0.0) {
+                const double s = 1.0 / (1.0 + dt * m_dens_dissipation);
+                for (size_t k = 0; k < m_dens.size(); k++)
+                    m_dens[k] *= s;
+            }
+            if (m_temp_relax > 0.0) {
+                const double s = 1.0 / (1.0 + dt * m_temp_relax);
+                for (size_t k = 0; k < m_T.size(); k++)
+                    m_T[k] = m_T_amb + (m_T[k] - m_T_amb) * s;
+            }
         }
 
         rebuild_solid();
@@ -149,6 +163,10 @@ class MACFluidSolver : public FluidSolver {
 
     // toggles the density/temp path
     void set_smoke(bool on) { m_smoke = on; }
+
+    // dye fade + temperature relaxation toward ambient (parity with Stam)
+    void set_density_dissipation(double rate) { m_dens_dissipation = rate; }
+    void set_temp_relaxation(double rate) { m_temp_relax = rate; }
 
     // smallest solid sdf over every body (positive = fluid side)
     double solid_sdf(const Vector2d &x) const {
@@ -908,7 +926,26 @@ class MACFluidSolver : public FluidSolver {
         }
         m_dens_src(i, j) += amount;
     }
-    void clear_sources() override { m_dens_src.zero(); }
+
+    // heat injected as a rate (applied in advance when smoke is on)
+    void add_heat_source(int i, int j, double amount) override {
+        if (i < 0 || i >= (int)m_nx || j < 0 || j >= (int)m_ny) {
+            return;
+        }
+        m_T_src(i, j) += amount;
+    }
+
+    void clear_sources() override {
+        m_dens_src.zero();
+        m_T_src.zero();
+    }
+
+    double temperature_at(const Vector2d &x,
+                          Interp interp = Interp::Linear) const override {
+        const double gx = (x.x() - m_origin.x()) / m_h;
+        const double gy = (x.y() - m_origin.y()) / m_h;
+        return sample(m_T, gx - 0.5, gy - 0.5, interp);
+    }
 
     // heat added straight into a cell
     void add_temperature(int i, int j, double amount) {
@@ -952,8 +989,10 @@ class MACFluidSolver : public FluidSolver {
         m_v_prev.zero();
         m_dens.zero();
         m_dens_prev.zero();
+        m_dens_src.zero();
         m_T.fill(m_T_amb);
         m_T_prev.zero();
+        m_T_src.zero();
         m_p.zero();
     }
 
@@ -978,6 +1017,8 @@ class MACFluidSolver : public FluidSolver {
     double m_buoy_beta = 0.0;  // temperature lift (eq. 5.1)
     double m_T_amb = 0.0;      // ambient temperature
     bool m_smoke = true;       // if it's enabled or not
+    double m_dens_dissipation = 0.0; // dye decay rate (1/s)
+    double m_temp_relax = 0.0;       // newton cooling toward ambient (1/s)
 
     // solids
     std::vector<const SolidBoundary *> m_bodies;
@@ -989,7 +1030,7 @@ class MACFluidSolver : public FluidSolver {
 
     // temperature field
     Field2D m_T, m_T_prev;
-    Field2D m_dens_src;
+    Field2D m_dens_src, m_T_src;
 
     // velocity self-advection targets + vorticity confinement work fields
     Field2D m_u_tmp, m_v_tmp;

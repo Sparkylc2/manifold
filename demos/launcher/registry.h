@@ -101,11 +101,10 @@ inline void populate_registry(DemoRegistry &registry) {
 
     registry.add<Demo::RocketLandingDemo>(
         "rocket_landing", "Rocket Landing", "Fluids",
-        "Self-landing rocket in a tall still-air domain: gimballed "
-        "thrust-vector "
-        "control + phased PD guidance, exhaust dye one-way coupled, lands on "
-        "the "
-        "pad via the optional collision resolver");
+        "Self-landing rocket over a heated pad: gimballed thrust-vector control "
+        "+ phased PD guidance, hot Stam exhaust plume convects into an FEA "
+        "platform, conducts through it, and sheds into a temperature-mapped "
+        "cooling channel underneath");
 
     registry.add<Demo::KarmanDemo>("karman", "Karman Vortex", "Fluids",
                                    "Flow past a cylinder (volume "

@@ -8,16 +8,6 @@
 namespace manifold::Coupling {
 using namespace Eigen;
 
-// fluid surface tractions -> FEA nodal loads.
-// walks the mesh boundary edges, samples the fluid pressure just outside each
-// wetted edge and integrates the traction onto its two nodes
-//      t = -p*n,  f_i = integral of N_i*t dS = t*L/2 for a linear edge
-//
-// under-relaxation: staggered two-way coupling with a hard fluid BC hits the
-// added-mass instability, the fluid over-reacts to the boundary motion and the
-// feedback diverges. blending the load with the previous tick's,
-//      f = w*f_new + (1-w)*f_prev
-// damps that. w=1 is off (fine for one-way / rigid), w~0.3 stabilises two-way
 class FeaFluidLoad {
   public:
     FeaFluidLoad(const Fluid::FluidSolver *fluid, FEA::ElasticBody *body)
@@ -62,7 +52,8 @@ class FeaFluidLoad {
 
         // blend with last tick, then apply
         for (int i = 0; i < nn; i++) {
-            const Vector2d f = m_relax * m_load[i] + (1.0 - m_relax) * m_prev[i];
+            const Vector2d f =
+                m_relax * m_load[i] + (1.0 - m_relax) * m_prev[i];
             m_body->add_nodal_force(i, f);
             m_prev[i] = f;
         }
