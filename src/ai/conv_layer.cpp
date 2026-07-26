@@ -46,7 +46,7 @@ void ConvolutionalLayer::init(int C_in, int C_out, int k_H, int k_W, int W,
     const int fan = k_H * k_W * (C_in + C_out);
     const double s =
         (act == Act::ReLU) ? std::sqrt(2.0 / fan) : std::sqrt(1.0 / fan);
-    Utils::randn(K, s, rng);
+    Utils::rand_n(K, s, rng);
 }
 
 // caches what backprop needs and computes the forward pass
@@ -164,13 +164,14 @@ MatrixXd ConvolutionalLayer::backward(const MatrixXd &dA) {
 // the naive flag selects the scalar hand-loop reference; the default routes to
 // the im2col + GEMM path
 
-Tensor<double, 3>
-ConvolutionalLayer::gather(const Tensor<double, 3> &large, bool naive) const {
+Tensor<double, 3> ConvolutionalLayer::gather(const Tensor<double, 3> &large,
+                                             bool naive) const {
     return naive ? gather_naive(large) : gather_quick(large);
 }
 
 Tensor<double, 3> ConvolutionalLayer::scatter(const Tensor<double, 3> &small,
-                                              int Wl, int Hl, bool naive) const {
+                                              int Wl, int Hl,
+                                              bool naive) const {
     return naive ? scatter_naive(small, Wl, Hl) : scatter_quick(small, Wl, Hl);
 }
 
@@ -300,8 +301,8 @@ void ConvolutionalLayer::col2im(const MatrixXd &cols, int Ws, int Hs,
             }
 }
 
-Tensor<double, 3>
-ConvolutionalLayer::gather_from_cols(const MatrixXd &P, int Ws, int Hs) const {
+Tensor<double, 3> ConvolutionalLayer::gather_from_cols(const MatrixXd &P,
+                                                       int Ws, int Hs) const {
     const int Cin = (int)K.dimension(2);
     const int Cout = (int)K.dimension(3);
     const int R = k_W * k_H * Cin;

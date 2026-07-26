@@ -38,11 +38,15 @@ void draw_node_dot(Renderer *r, const Vector2d &p, const CircuitStyle &s) {
     r->draw_circle(p.x(), p.y(), s.node_radius, s.node);
 }
 
-// 90-degree route: leave each pin along its axis for the deadzone, then a
-// single perpendicular/axial elbow into the far end.
+// 90-degree route: leave each pin along its axis for the deadzone, then elbow
+// into the far end. corners that would double back over a pin's lead are
+// penalised; if the target sits behind both leads the wire wraps around via a
+// mid-line instead of cutting across the glyphs.
 static void route(Renderer *r, const CircuitSchematic &sch, const Wire &w,
                   Color col, float th) {
     const Vector2d pa = sch.end_pos(w.a), pb = sch.end_pos(w.b);
+    if ((pb - pa).norm() < 1e-7)
+        return; // coincident pins (series butt joint): nothing to draw
     const Vector2d da = sch.end_dir(w.a), db = sch.end_dir(w.b);
     if (!sch.ortho) {
         line(r, pa, pb, th, col);
@@ -51,16 +55,51 @@ static void route(Renderer *r, const CircuitSchematic &sch, const Wire &w,
     const bool hasA = da.norm() > 1e-9, hasB = db.norm() > 1e-9;
     const Vector2d a1 = hasA ? Vector2d(pa + da * sch.deadzone) : pa;
     const Vector2d b1 = hasB ? Vector2d(pb + db * sch.deadzone) : pb;
-    if (hasA)
-        line(r, pa, a1, th, col);
-    if (hasB)
-        line(r, pb, b1, th, col);
-    // turn along the axis with the larger gap first
+    auto seg = [&](const Vector2d &p, const Vector2d &q) {
+        if ((q - p).norm() > 1e-7)
+            line(r, p, q, th, col);
+    };
+    seg(pa, a1);
+    seg(pb, b1);
+
     const double gx = std::abs(b1.x() - a1.x()), gy = std::abs(b1.y() - a1.y());
+    if (gx < 1e-7 || gy < 1e-7) {
+        seg(a1, b1);
+        return;
+    }
+    const Vector2d c1(b1.x(), a1.y()), c2(a1.x(), b1.y());
+    auto pen = [&](const Vector2d &c) {
+        int p = 0;
+        if (hasA && (c - a1).dot(da) < -1e-9)
+            p++;
+        if (hasB && (c - b1).dot(db) < -1e-9)
+            p++;
+        return p;
+    };
+    const int p1 = pen(c1), p2 = pen(c2);
+    if (p1 > 0 && p2 > 0) {
+        // behind both leads: wrap via a line halfway between the rows/columns
+        if (std::abs(da.x()) > 0.5) {
+            double ym = 0.5 * (a1.y() + b1.y());
+            if (gy < 0.2)
+                ym = std::max(a1.y(), b1.y()) + 0.6;
+            seg(a1, {a1.x(), ym});
+            seg({a1.x(), ym}, {b1.x(), ym});
+            seg({b1.x(), ym}, b1);
+        } else {
+            double xm = 0.5 * (a1.x() + b1.x());
+            if (gx < 0.2)
+                xm = std::max(a1.x(), b1.x()) + 0.6;
+            seg(a1, {xm, a1.y()});
+            seg({xm, a1.y()}, {xm, b1.y()});
+            seg({xm, b1.y()}, b1);
+        }
+        return;
+    }
     const Vector2d corner =
-        (gx > gy) ? Vector2d(b1.x(), a1.y()) : Vector2d(a1.x(), b1.y());
-    line(r, a1, corner, th, col);
-    line(r, corner, b1, th, col);
+        (p1 < p2) ? c1 : (p2 < p1) ? c2 : (gx > gy ? c1 : c2);
+    seg(a1, corner);
+    seg(corner, b1);
 }
 
 void draw_resistor(Renderer *r, const Vector2d &a, const Vector2d &b,
@@ -234,15 +273,40 @@ static void draw_glyphs(Renderer *r, const CircuitSchematic &sch,
     }
 }
 
+// a dot marks an electrical junction: >= 3 conductors meeting (wire ends,
+// plus one for an element pin). single-wire waypoints are open terminals.
+struct JunctionPt {
+    Vector2d p;
+    int wires = 0;
+    bool pin = false, waypoint = false;
+    int node = -2; // electrical node for voltage colouring
+};
+
+static std::vector<JunctionPt> junctions(const CircuitSchematic &sch,
+                                         const Electrical::CircuitSystem *sys);
+
+static void draw_junctions(Renderer *r, const CircuitSchematic &sch,
+                           const CircuitStyle &s,
+                           const Electrical::CircuitSystem *sys, double vmax) {
+    for (const JunctionPt &j : junctions(sch, sys)) {
+        CircuitStyle st = s;
+        if (sys && j.node != -2)
+            st.node = voltage_ramp(sys->node_voltage(j.node), vmax);
+        const int score = j.wires + (j.pin ? 1 : 0);
+        if (score >= 3)
+            draw_node_dot(r, j.p, st);
+        else if (j.waypoint && j.wires == 1)
+            circle_outline(r, j.p, st.node_radius * 1.5, s.body_thick * 0.8,
+                           st.node); // terminal
+    }
+}
+
 void draw_circuit(Renderer *r, const CircuitSchematic &sch,
                   const CircuitStyle &s) {
     for (const Wire &w : sch.wires)
         route(r, sch, w, s.wire, s.wire_thick);
     draw_glyphs(r, sch, s);
-    for (const Wire &w : sch.wires) {
-        draw_node_dot(r, sch.end_pos(w.a), s);
-        draw_node_dot(r, sch.end_pos(w.b), s);
-    }
+    draw_junctions(r, sch, s, nullptr, 1.0);
 }
 
 // muted signed ramp: green for +, red for -, dim neutral near 0 (theme colours)
@@ -297,6 +361,50 @@ static int color_node(const CircuitSchematic &sch, const Wire &w,
     return best;
 }
 
+// merges coincident wire ends (quantised) into junction points
+static std::vector<JunctionPt> junctions(const CircuitSchematic &sch,
+                                         const Electrical::CircuitSystem *sys) {
+    std::vector<JunctionPt> pts;
+    auto key_of = [](const Vector2d &p) {
+        return std::pair<long, long>((long)std::llround(p.x() * 1e3),
+                                     (long)std::llround(p.y() * 1e3));
+    };
+    auto find = [&](const Vector2d &p) -> JunctionPt & {
+        const auto k = key_of(p);
+        for (JunctionPt &j : pts)
+            if (key_of(j.p) == k)
+                return j;
+        pts.push_back({p});
+        return pts.back();
+    };
+    for (const Wire &w : sch.wires) {
+        const Vector2d pa = sch.end_pos(w.a), pb = sch.end_pos(w.b);
+        if ((pb - pa).norm() < 1e-7)
+            continue; // series butt joint, not a junction
+        for (const WireEnd *e : {&w.a, &w.b}) {
+            JunctionPt &j = find(sch.end_pos(*e));
+            j.wires++;
+            if (e->kind == EndKind::Pin)
+                j.pin = true;
+            else
+                j.waypoint = true;
+            if (sys) { // keep the strongest node for colouring
+                int c[4], n = 0;
+                end_nodes(sch, *e, c, n);
+                for (int i = 0; i < n; ++i) {
+                    if (c[i] == -2)
+                        continue;
+                    if (j.node == -2 ||
+                        std::abs(sys->node_voltage(c[i])) >
+                            std::abs(sys->node_voltage(j.node)))
+                        j.node = c[i];
+                }
+            }
+        }
+    }
+    return pts;
+}
+
 void draw_circuit(Renderer *r, const CircuitSchematic &sch,
                   const Electrical::CircuitSystem &sys, double vmax,
                   const CircuitStyle &base) {
@@ -307,14 +415,7 @@ void draw_circuit(Renderer *r, const CircuitSchematic &sch,
         route(r, sch, w, c, base.wire_thick);
     }
     draw_glyphs(r, sch, base);
-    for (const Wire &w : sch.wires) {
-        const int node = color_node(sch, w, sys);
-        CircuitStyle s = base;
-        if (node != -2)
-            s.node = voltage_ramp(sys.node_voltage(node), vmax);
-        draw_node_dot(r, sch.end_pos(w.a), s);
-        draw_node_dot(r, sch.end_pos(w.b), s);
-    }
+    draw_junctions(r, sch, base, &sys, vmax);
 }
 
 void VoltageScope::sample(const Electrical::CircuitSystem &c) {

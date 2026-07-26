@@ -93,7 +93,8 @@ struct ConvolutionalLayer : public Layer {
 
     // GEMM halves operating on precomputed im2col patches P
     Tensor<double, 3> gather_from_cols(const MatrixXd &P, int Ws, int Hs) const;
-    void correlate_from_cols(const MatrixXd &P, const Tensor<double, 3> &small_n,
+    void correlate_from_cols(const MatrixXd &P,
+                             const Tensor<double, 3> &small_n,
                              Tensor<double, 4> &gK);
 
     void add_bias(Tensor<double, 3> &Z_n) const;

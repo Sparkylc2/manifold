@@ -15,7 +15,7 @@ void DenseLayer::init(int in, int out, Act a, std::mt19937 &rng) {
     // He for ReLU, Xavier otherwise
     const double s =
         (a == Act::ReLU) ? std::sqrt(2.0 / in) : std::sqrt(1.0 / in);
-    Utils::randn(W, s, rng);
+    Utils::rand_n(W, s, rng);
 }
 
 MatrixXd DenseLayer::forward(const MatrixXd &X) {

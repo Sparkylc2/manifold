@@ -10,16 +10,36 @@ template <typename T> inline int sign(T val) {
     return (T(0) < val) - (val < T(0));
 }
 
+inline Eigen::VectorXd elementwise_sigma(const Eigen::VectorXd &in) {
+    Eigen::VectorXd out(in.size());
+    for (int i = 0; i < in.size(); i++)
+        out[i] = 1.0 / (1 + std::exp(-in[i]));
+    return out;
+}
+
 // fill M in place with N(0, stddev) draws from a caller-owned rng
-inline void randn(Eigen::MatrixXd &M, double stddev, std::mt19937 &rng) {
+inline void rand_n(Eigen::MatrixXd &M, double stddev, std::mt19937 &rng) {
     std::normal_distribution<double> d(0.0, stddev);
     for (int i = 0; i < M.size(); ++i)
         M.data()[i] = d(rng);
 }
 
+// fill M with a uniform distriudtion
+inline void rand_u(Eigen::MatrixXd &M, double k, std::mt19937 &rng) {
+    std::uniform_real_distribution<double> d(-k, k);
+    for (int i = 0; i < M.size(); ++i)
+        M.data()[i] = d(rng);
+}
+
+inline void rand_u_resize(Eigen::MatrixXd &M, double k, int r, int c,
+                          std::mt19937 &rng) {
+    M.resize(r, c);
+    rand_u(M, k, rng);
+}
+
 template <typename Derived>
-inline void randn(Eigen::TensorBase<Derived, Eigen::WriteAccessors> &M,
-                  double stddev, std::mt19937 &rng) {
+inline void rand_n(Eigen::TensorBase<Derived, Eigen::WriteAccessors> &M,
+                   double stddev, std::mt19937 &rng) {
     using Scalar = typename Eigen::internal::traits<Derived>::Scalar;
     Derived &D = static_cast<Derived &>(M);
     std::normal_distribution<double> d(0.0, stddev);
