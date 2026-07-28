@@ -77,6 +77,14 @@ Color FieldView::color_at(double t) const {
 }
 
 double FieldView::edge_fade(int tx, int ty, int tw, int th) const {
+    if (m_settings.edge_fade_frac > 0.0) {
+        // proportional per axis, so the visible extent stays a fixed fraction
+        // of the domain however the domain is resized
+        const double f = m_settings.edge_fade_frac;
+        const double fx = std::min(tx, tw - 1 - tx) / std::max(1.0, f * tw);
+        const double fy = std::min(ty, th - 1 - ty) / std::max(1.0, f * th);
+        return std::clamp(std::min(fx, fy), 0.0, 1.0);
+    }
     if (m_settings.edge_fade_px <= 0)
         return 1.0;
     const double f = (double)m_settings.edge_fade_px;

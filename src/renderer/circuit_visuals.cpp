@@ -106,11 +106,12 @@ void draw_resistor(Renderer *r, const Vector2d &a, const Vector2d &b,
                    const CircuitStyle &s) {
     const double L = (b - a).norm();
     const Vector2d u = unit(b - a), pp(-u.y(), u.x());
-    const Vector2d bs = a + u * (0.30 * L), be = b - u * (0.30 * L);
+    const Vector2d bs = a + u * (s.lead_frac * L),
+                   be = b - u * (s.lead_frac * L);
     line(r, a, bs, s.body_thick, s.body);
     line(r, be, b, s.body_thick, s.body);
-    const int segs = 7;
-    const double amp = 0.12 * L;
+    const int segs = s.zig_segs;
+    const double amp = s.zig_amp * L;
     Vector2d prev = bs;
     for (int k = 1; k <= segs; ++k) {
         const double t = (double)k / segs;
@@ -126,7 +127,7 @@ void draw_capacitor(Renderer *r, const Vector2d &a, const Vector2d &b,
     const double L = (b - a).norm();
     const Vector2d u = unit(b - a), pp(-u.y(), u.x());
     const Vector2d mid = (a + b) * 0.5;
-    const double gap = 0.10 * L, h = 0.26 * L;
+    const double gap = s.cap_gap * L, h = s.cap_plate * L;
     const Vector2d p1 = mid - u * (gap * 0.5), p2 = mid + u * (gap * 0.5);
     line(r, a, p1, s.body_thick, s.body);
     line(r, p2, b, s.body_thick, s.body);
@@ -141,8 +142,8 @@ void draw_inductor(Renderer *r, const Vector2d &a, const Vector2d &b,
     const Vector2d bs = a + u * (0.22 * L), be = b - u * (0.22 * L);
     line(r, a, bs, s.body_thick, s.body);
     line(r, be, b, s.body_thick, s.body);
-    const int humps = 4, segs = humps * 10;
-    const double amp = 0.17 * L;
+    const int humps = s.coil_humps, segs = humps * 10;
+    const double amp = s.coil_amp * L;
     Vector2d prev = bs;
     for (int k = 1; k <= segs; ++k) {
         const double t = (double)k / segs;
@@ -158,12 +159,12 @@ void draw_voltage_source(Renderer *r, const Vector2d &a, const Vector2d &b,
     const double L = (b - a).norm();
     const Vector2d u = unit(b - a), pp(-u.y(), u.x());
     const Vector2d c = (a + b) * 0.5;
-    const double rad = 0.26 * L;
+    const double rad = s.src_rad * L;
     line(r, a, c - u * rad, s.body_thick, s.body);
     line(r, c + u * rad, b, s.body_thick, s.body);
     circle_outline(r, c, rad, s.body_thick, s.body);
     const Vector2d cp = c - u * (rad * 0.45), cm = c + u * (rad * 0.45);
-    const double m = 0.09 * L;
+    const double m = s.mark_len * L;
     line(r, cp - u * m, cp + u * m, s.body_thick, s.mark);
     line(r, cp - pp * m, cp + pp * m, s.body_thick, s.mark);
     line(r, cm - pp * m, cm + pp * m, s.body_thick, s.mark);
@@ -174,7 +175,7 @@ void draw_current_source(Renderer *r, const Vector2d &a, const Vector2d &b,
     const double L = (b - a).norm();
     const Vector2d u = unit(b - a);
     const Vector2d c = (a + b) * 0.5;
-    const double rad = 0.26 * L;
+    const double rad = s.src_rad * L;
     line(r, a, c - u * rad, s.body_thick, s.body);
     line(r, c + u * rad, b, s.body_thick, s.body);
     circle_outline(r, c, rad, s.body_thick, s.body);
@@ -186,7 +187,8 @@ void draw_diode(Renderer *r, const Vector2d &a, const Vector2d &b,
                 const CircuitStyle &s) {
     const double L = (b - a).norm();
     const Vector2d u = unit(b - a), pp(-u.y(), u.x());
-    const Vector2d bs = a + u * (0.30 * L), be = b - u * (0.30 * L);
+    const Vector2d bs = a + u * (s.lead_frac * L),
+                   be = b - u * (s.lead_frac * L);
     const double h = 0.18 * L;
     line(r, a, bs, s.body_thick, s.body);
     line(r, be, b, s.body_thick, s.body);
@@ -202,9 +204,9 @@ void draw_op_amp(Renderer *r, const Vector2d &in_p, const Vector2d &in_n,
     const Vector2d u = unit(out - o), pp = unit(in_p - in_n);
     const double hp = (in_p - in_n).norm() * 0.5; // input half-separation
     const double Lax = (out - o).dot(u);
-    const Vector2d top = o + pp * hp + u * (0.30 * Lax);
-    const Vector2d bot = o - pp * hp + u * (0.30 * Lax);
-    const Vector2d apex = o + u * (0.86 * Lax);
+    const Vector2d top = o + pp * hp + u * (s.op_lead * Lax);
+    const Vector2d bot = o - pp * hp + u * (s.op_lead * Lax);
+    const Vector2d apex = o + u * (s.op_body * Lax);
 
     r->draw_triangle(top.x(), top.y(), bot.x(), bot.y(), apex.x(), apex.y(),
                      s.fill);
@@ -216,8 +218,8 @@ void draw_op_amp(Renderer *r, const Vector2d &in_p, const Vector2d &in_n,
     line(r, apex, out, s.body_thick, s.body);
 
     const double m = hp * 0.2;
-    const Vector2d cp = top - pp * (hp * 0.59) + u * (0.14 * Lax);
-    const Vector2d cm = bot + pp * (hp * 0.59) + u * (0.14 * Lax);
+    const Vector2d cp = top - pp * (hp * 0.59) + u * (0.16 * Lax);
+    const Vector2d cm = bot + pp * (hp * 0.59) + u * (0.16 * Lax);
     line(r, cp - u * m, cp + u * m, s.body_thick, s.mark);
     line(r, cp - pp * m, cp + pp * m, s.body_thick, s.mark);
     line(r, cm - pp * m, cm + pp * m, s.body_thick, s.mark);
@@ -228,11 +230,11 @@ void draw_ground(Renderer *r, const Vector2d &p, double theta,
     const double c = std::cos(theta), sn = std::sin(theta);
     const Vector2d down(sn, -c); // theta 0 -> straight down
     const Vector2d pp(-down.y(), down.x());
-    line(r, p, p + down * 0.14, s.body_thick, s.body);
-    const double w[3] = {0.20, 0.13, 0.06};
+    line(r, p, p + down * s.gnd_stem, s.body_thick, s.body);
     for (int i = 0; i < 3; ++i) {
-        const Vector2d ctr = p + down * (0.14 + 0.08 * i);
-        line(r, ctr + pp * w[i], ctr - pp * w[i], s.body_thick, s.body);
+        const double w = s.gnd_w * (1.0 - 0.35 * i);
+        const Vector2d ctr = p + down * (s.gnd_stem + s.gnd_step * i);
+        line(r, ctr + pp * w, ctr - pp * w, s.body_thick, s.body);
     }
 }
 
@@ -243,8 +245,10 @@ static void draw_glyphs(Renderer *r, const CircuitSchematic &sch,
         if (pl.glyph == Glyph::OpAmp) {
             draw_op_amp(r, sch.pin_world(i, 0), sch.pin_world(i, 1),
                         sch.pin_world(i, 2), s);
+            // rotate the ground with the glyph, or on a rotated op-amp it
+            // hangs down into the body
             if (pl.ground_inp)
-                draw_ground(r, sch.pin_world(i, 0), 0.0, s);
+                draw_ground(r, sch.pin_world(i, 0), pl.theta, s);
             continue;
         }
         const Vector2d a = sch.pin_world(i, 0), b = sch.pin_world(i, 1);

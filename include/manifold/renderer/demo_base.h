@@ -17,6 +17,8 @@ class DemoBase {
     virtual void process(double dt) = 0;
     virtual void render(Rendering::Renderer *r) = 0;
 
+    virtual void render_cell(Rendering::Renderer *r) { render(r); }
+
     // todo: add this so we can deallocate textures when closing a demo
     // virtual void end() = 0;
 
@@ -42,8 +44,6 @@ class DemoBase {
     virtual void on_input(Rendering::Renderer *r);
 
     void draw_grid(Rendering::Renderer *r);
-
-    // ---- portrait layout helpers ----
 
     // the 9:16 strip boundaries in screen pixels
     int portrait_strip_width(Rendering::Renderer *r) const;

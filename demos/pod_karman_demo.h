@@ -141,6 +141,16 @@ class PODKarmanDemo : public DemoBase {
 
     void render(Rendering::Renderer *r) override {
         draw_grid(r);
+        render_cell(r);
+
+        draw_hud(r);
+
+        // KE trace, bottom-left (clear of the top-right colourbar)
+        m_ke_plot.render(r, r->screen_width() - 292, r->screen_height() - 92,
+                         280, 80);
+    }
+
+    void render_cell(Rendering::Renderer *r) override {
 
         const Vector2d o = m_fluid.origin();
         const double vmax = 2.0 * INFLOW;
@@ -159,11 +169,6 @@ class PODKarmanDemo : public DemoBase {
 
         draw_reconstruction(r, o, vmax);
         draw_mode_panels(r, o);
-        draw_hud(r);
-
-        // KE trace, bottom-left (clear of the top-right colourbar)
-        m_ke_plot.render(r, r->screen_width() - 292, r->screen_height() - 92,
-                         280, 80);
     }
 
   protected:

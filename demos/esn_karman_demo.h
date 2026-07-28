@@ -195,6 +195,13 @@ class ESNKarmanDemo : public DemoBase {
     }
 
     void render(Rendering::Renderer *r) override {
+        render_cell(r);
+
+        draw_hud(r);
+        m_loss_plot.render(r, 12, r->screen_height() - 92, 280, 80);
+    }
+
+    void render_cell(Rendering::Renderer *r) override {
         const Vector2d o = m_fluid.origin();
         const double vmax = 2.0 * INFLOW;
 
@@ -217,8 +224,6 @@ class ESNKarmanDemo : public DemoBase {
 
         draw_reconstruction(r, o, vmax);
         draw_latent(r, o);
-        draw_hud(r);
-        m_loss_plot.render(r, 12, r->screen_height() - 92, 280, 80);
     }
 
   protected:

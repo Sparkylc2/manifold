@@ -7,6 +7,7 @@
 #include "../aerofoil_flutter_demo.h"
 #include "../cae2_karman_demo.h"
 #include "../cae_karman_demo.h"
+#include "../cart_double_pendulum_demo.h"
 #include "../cart_pendulum_demo.h"
 #include "../circuit_demo.h"
 #include "../crank_slider.h"
@@ -34,6 +35,7 @@
 #include "../showcase2_demo.h"
 #include "../solar_system_demo.h"
 #include "../spring_demo.h"
+#include "../story_demo.h"
 #include "../string_art.h"
 #include "../supersonic_demo.h"
 #include "../truss_demo.h"
@@ -63,6 +65,11 @@ inline void populate_registry(DemoRegistry &registry) {
         "cart_pendulum", "Cart-Pendulum PID", "Control",
         "PID-controlled inverted pendulum on a sliding cart");
 
+    registry.add<Demo::CartDoublePendulumDemo>(
+        "cart_double_pendulum", "Cart Double-Pendulum", "Control",
+        "Double inverted pendulum on a cart held upright by LQR "
+        "state feedback");
+
     registry.add<Demo::NBodyDemo>("nbody", "Barnes-Hut NBody", "Misc",
                                   "High particle count gravity resolution");
 
@@ -77,6 +84,12 @@ inline void populate_registry(DemoRegistry &registry) {
         "Motor-driven crank with spring-coupled slider");
     registry.add<Demo::JansenDemo>("jansen", "Jansen Linkage", "Mechanisms",
                                    "Strandbeest leg with foot-path tracing");
+
+    registry.add<Demo::StoryDemo>(
+        "story", "Story Reel", "Showcase",
+        "9:16 four-frame story. Opens in SOLO: one slot at a time in its real "
+        "story position, for recording a pass per cell. [N/B] slot, [T] reel, "
+        "[A-D] seek in reel, [G] debug, [P] 9:16 guides");
 
     registry.add<Demo::GraphicsTestDemo>(
         "graphics_test", "Graphics Test", "Sandbox",

@@ -11,13 +11,13 @@
 
 namespace manifold::Rendering {
 
-// t in [0,1] -> Color. queries the palette internally
 using Colormap = std::function<Color(double)>;
 
 struct FieldViewSettings {
-    int supersample = 1;     // texels per cell per axis (>=1).
-    bool bilinear = true;    // GPU texture filter
-    int edge_fade_px = 0;    // border fade width, in texels (0 = off)
+    int supersample = 1;  // texels per cell per axis (>=1).
+    bool bilinear = true; // GPU texture filter
+    int edge_fade_px = 0; // border fade width, in texels (0 = off)
+    double edge_fade_frac = 0.0;
     double gamma = 1.0;      // value^gamma before the colormap
     bool colorbar = true;    // draw the vertical key
     int bar_w = 16;          // colorbar width, px

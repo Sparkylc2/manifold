@@ -128,6 +128,8 @@ target_link_libraries(manifold_pde INTERFACE Eigen3::Eigen)
 add_library(manifold_renderer STATIC
     src/renderer/raylib_renderer.cpp
     src/renderer/layered_renderer.cpp
+    src/renderer/transform_renderer.cpp
+    src/renderer/grid_patch.cpp
     src/renderer/camera_controller.cpp
     src/renderer/hud_panel.cpp
     src/renderer/scene3d.cpp

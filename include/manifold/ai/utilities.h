@@ -23,6 +23,11 @@ inline void rand_n(Eigen::MatrixXd &M, double stddev, std::mt19937 &rng) {
     for (int i = 0; i < M.size(); ++i)
         M.data()[i] = d(rng);
 }
+inline void rand_n(Eigen::VectorXd &v, double stddev, std::mt19937 &rng) {
+    std::normal_distribution<double> d(0.0, stddev);
+    for (int i = 0; i < v.size(); ++i)
+        v.data()[i] = d(rng);
+}
 
 // fill M with a uniform distriudtion
 inline void rand_u(Eigen::MatrixXd &M, double k, std::mt19937 &rng) {
@@ -122,6 +127,10 @@ inline Eigen::MatrixXd chip_to_matrix(const Eigen::Tensor<double, 3> &tensor,
         }
     }
     return mat;
+}
+
+inline Eigen::MatrixXd sigmoid(const Eigen::MatrixXd &A) {
+    return (1.0 / (1.0 + (-A.array()).exp())).matrix();
 }
 
 } // namespace manifold::AI::Utils

@@ -287,6 +287,14 @@ class JansenDemo : public DemoBase {
 
     void render(Rendering::Renderer *r) override {
         draw_grid(r);
+        render_cell(r);
+
+        render_hud(r);
+        std::vector<PlotWidget *> plots = {&m_plot_foot_y};
+        render_plots(r, plots, 280, 80);
+    }
+
+    void render_cell(Rendering::Renderer *r) override {
         auto fg = Rendering::palette::foreground();
         auto dim = Rendering::palette::text_dim();
         auto a2 = Rendering::palette::accent2();
@@ -311,10 +319,6 @@ class JansenDemo : public DemoBase {
         // legs
         for (int i = 0; i < 4; ++i)
             draw_leg(r, m_legs[i], leg_col[i]);
-
-        render_hud(r);
-        std::vector<PlotWidget *> plots = {&m_plot_foot_y};
-        render_plots(r, plots, 280, 80);
     }
 
   protected:

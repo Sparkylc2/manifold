@@ -275,6 +275,17 @@ class EngineDemo : public DemoBase {
 
     void render(Rendering::Renderer *r) override {
         draw_grid(r);
+        render_cell(r);
+
+        draw_phase_diagram(r);
+
+        render_hud(r);
+
+        std::vector<PlotWidget *> plots = {&m_plot_L, &m_plot_R, &m_plot_rpm};
+        render_plots(r, plots, 280, 65);
+    }
+
+    void render_cell(Rendering::Renderer *r) override {
 
         auto fg = Rendering::palette::foreground();
         auto dim = Rendering::palette::text_dim();
@@ -428,12 +439,6 @@ class EngineDemo : public DemoBase {
             {.show_label = false, .ref_line_len = CrankR * 0.8});
 
         // ---- phase diagram ----
-        draw_phase_diagram(r);
-
-        render_hud(r);
-
-        std::vector<PlotWidget *> plots = {&m_plot_L, &m_plot_R, &m_plot_rpm};
-        render_plots(r, plots, 280, 65);
     }
 
   protected:
