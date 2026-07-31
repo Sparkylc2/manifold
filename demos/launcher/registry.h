@@ -5,8 +5,8 @@
 #include "../ae_karman_demo.h"
 #include "../aerofoil_elevator_demo.h"
 #include "../aerofoil_flutter_demo.h"
-#include "../cae2_karman_demo.h"
 #include "../cae_karman_demo.h"
+
 #include "../cart_double_pendulum_demo.h"
 #include "../cart_pendulum_demo.h"
 #include "../circuit_demo.h"
@@ -114,7 +114,8 @@ inline void populate_registry(DemoRegistry &registry) {
 
     registry.add<Demo::RocketLandingDemo>(
         "rocket_landing", "Rocket Landing", "Fluids",
-        "Self-landing rocket over a heated pad: gimballed thrust-vector control "
+        "Self-landing rocket over a heated pad: gimballed thrust-vector "
+        "control "
         "+ phased PD guidance, hot Stam exhaust plume convects into an FEA "
         "platform, conducts through it, and sheds into a temperature-mapped "
         "cooling channel underneath");
@@ -133,11 +134,6 @@ inline void populate_registry(DemoRegistry &registry) {
         "POD-reduced autoencoder trained live: untrained net reconstructs "
         "garbage, sharpens as it trains; node-value network diagram");
 
-    registry.add<Demo::CAEKarmanDemo>(
-        "karman_cae", "Karman CAE", "Fluids",
-        "POD-reduced autoencoder trained live: untrained net reconstructs "
-        "garbage, sharpens as it trains; node-value network diagram");
-
     registry.add<Demo::ESNKarmanDemo>(
         "karman_esn", "Karman ESN", "Fluids",
         "Coarse autoencoder latent forecast by an echo state network: freezes "
@@ -145,8 +141,8 @@ inline void populate_registry(DemoRegistry &registry) {
         "then "
         "lets reality catch up");
 
-    registry.add<Demo::CAE2KarmanDemo>(
-        "karman_cae2", "Karman CAE (conv)", "Fluids",
+    registry.add<Demo::CAEKarmanDemo>(
+        "karman_cae", "Karman CAE ", "Fluids",
         "Convolutional autoencoder trained live on a background thread: "
         "reconstructs a coarse velocity field, sharpening as it learns");
 
@@ -172,7 +168,8 @@ inline void populate_registry(DemoRegistry &registry) {
 
     registry.add<Demo::NozzleDemo>(
         "nozzle", "Nozzle Plume", "Fluids",
-        "Axisymmetric compressible Euler (HLLC + MUSCL); round exhaust jet with "
+        "Axisymmetric compressible Euler (HLLC + MUSCL); round exhaust jet "
+        "with "
         "a shock-diamond train and Mach disk; adjust chamber/ambient pressure");
 
     registry.add<Demo::DiffuserDemo>(

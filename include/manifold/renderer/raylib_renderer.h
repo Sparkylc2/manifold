@@ -46,6 +46,8 @@ class RaylibRenderer : public Renderer {
 
     void draw_rect(double x, double y, double w, double h, Color color,
                    double theta = 0.0) override;
+    void draw_rounded_rect(double x, double y, double w, double h, Color color,
+                           double theta = 0.0, double r = 1.0) override;
 
     void draw_arrow(double x0, double y0, double x1, double y1,
                     double thickness, Color color) override;

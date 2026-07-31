@@ -235,6 +235,39 @@ void RaylibRenderer::draw_rect(double x, double y, double w, double h,
                      detail::to_rl(color));
 }
 
+void RaylibRenderer::draw_rounded_rect(double x, double y, double w, double h,
+                                       Color color, double theta,
+                                       double roundedness) {
+    const float sw = (float)(w * m_zoom), sh = (float)(h * m_zoom);
+    if (sw < 0.5f || sh < 0.5f)
+        return;
+
+    const float rn = (float)std::clamp(roundedness, 0.0, 1.0);
+    // segments track the on-screen arc, so a 4px bar isn't paying for 20 of
+    // them and a full-height one doesn't go faceted
+    const float rad = rn * std::min(sw, sh) * 0.5f;
+    const int seg = std::clamp((int)(rad * 0.75f), 4, 24);
+
+    const Rectangle rec{-sw * 0.5f, -sh * 0.5f, sw, sh};
+    const ::Color rl = detail::to_rl(color);
+
+    // the unrotated case is the common one and skips rlgl's per-vertex
+    // transform path entirely
+    if (std::abs(theta) < 1e-9) {
+        DrawRectangleRounded({w2sx(x) + rec.x, w2sy(y) + rec.y, sw, sh}, rn,
+                             seg, rl);
+        return;
+    }
+
+    // DrawRectangleRounded takes no rotation, so spin the rlgl matrix and draw
+    // the rect about its own centre
+    rlPushMatrix();
+    rlTranslatef(w2sx(x), w2sy(y), 0.0f);
+    rlRotatef((float)(-theta * 180.0 / M_PI), 0.0f, 0.0f, 1.0f);
+    DrawRectangleRounded(rec, rn, seg, rl);
+    rlPopMatrix();
+}
+
 void RaylibRenderer::draw_arrow(double x0, double y0, double x1, double y1,
                                 double thickness, Color color) {
     float sx0 = w2sx(x0), sy0 = w2sy(y0), sx1 = w2sx(x1), sy1 = w2sy(y1);

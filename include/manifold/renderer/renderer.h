@@ -60,13 +60,14 @@ class Renderer {
                              Color color) = 0;
     virtual void draw_rect(double x, double y, double w, double h, Color color,
                            double theta = 0.0) = 0;
+    virtual void draw_rounded_rect(double x, double y, double w, double h,
+                                   Color color, double theta = 0.0,
+                                   double r = 1.0) = 0;
     virtual void draw_arrow(double x0, double y0, double x1, double y1,
                             double thickness, Color color) = 0;
     virtual void draw_triangle(double x0, double y0, double x1, double y1,
                                double x2, double y2, Color color) = 0;
 
-    // per-vertex colour (gouraud) triangle, for smooth scalar fields.
-    // default averages the three colours and falls back to a flat fill
     virtual void draw_triangle_gradient(double x0, double y0, Color c0,
                                         double x1, double y1, Color c1,
                                         double x2, double y2, Color c2) {
@@ -102,7 +103,8 @@ class Renderer {
 
     virtual void draw_texture(unsigned int tex_id, int tex_w, int tex_h,
                               int dst_x, int dst_y, int dst_w, int dst_h,
-                              bool flip_v, Color tint = Color::hex(0xFFFFFFFFu)) {
+                              bool flip_v,
+                              Color tint = Color::hex(0xFFFFFFFFu)) {
         (void)tex_id, (void)tex_w, (void)tex_h, (void)dst_x, (void)dst_y;
         (void)dst_w, (void)dst_h, (void)flip_v, (void)tint;
     }

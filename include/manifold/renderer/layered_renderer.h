@@ -46,9 +46,11 @@ class LayeredRenderer : public Renderer {
 
     void draw_rect(double x, double y, double w, double h, Color color,
                    double theta = 0.0) override;
+    void draw_rounded_rect(double x, double y, double w, double h, Color color,
+                           double theta = 0.0, double r = 1.0) override;
 
-    void draw_arrow(double x0, double y0, double x1, double y1, double thickness,
-                    Color color) override;
+    void draw_arrow(double x0, double y0, double x1, double y1,
+                    double thickness, Color color) override;
 
     void draw_triangle(double x0, double y0, double x1, double y1, double x2,
                        double y2, Color color) override;
@@ -72,8 +74,8 @@ class LayeredRenderer : public Renderer {
     void draw_screen_line(int x0, int y0, int x1, int y1, float thickness,
                           Color color) override;
 
-    void draw_smooth_screen_line(int x0, int y0, int x1, int y1, float thickness,
-                                 Color color) override;
+    void draw_smooth_screen_line(int x0, int y0, int x1, int y1,
+                                 float thickness, Color color) override;
 
     void draw_screen_rect(int x, int y, int w, int h, Color color) override;
 
@@ -111,16 +113,31 @@ class LayeredRenderer : public Renderer {
 
   private:
     enum class Op {
-        Bar, Disk, Line, SmoothLine, Circle, Rect, Arrow, Tri, TriGrad, Grid,
-        Text, TextRot, ScreenLine, SmoothScreenLine, ScreenRect, TexQuad
+        Bar,
+        Disk,
+        Line,
+        SmoothLine,
+        Circle,
+        Rect,
+        RoundRect,
+        Arrow,
+        Tri,
+        TriGrad,
+        Grid,
+        Text,
+        TextRot,
+        ScreenLine,
+        SmoothScreenLine,
+        ScreenRect,
+        TexQuad
     };
 
     struct Cmd {
         Op op;
         double a = 0, b = 0, c = 0, d = 0, e = 0, f = 0; // generic world params
-        Color col{0, 0, 0, 0}, col2{0, 0, 0, 0};  // fill/color, shadow/axis
-        Color col3{0, 0, 0, 0};                    // third vertex (TriGrad)
-        int i0 = 0, i1 = 0, i2 = 0, i3 = 0;        // screen ints
+        Color col{0, 0, 0, 0}, col2{0, 0, 0, 0}; // fill/color, shadow/axis
+        Color col3{0, 0, 0, 0};                  // third vertex (TriGrad)
+        int i0 = 0, i1 = 0, i2 = 0, i3 = 0;      // screen ints
         float fthick = 0;
         std::string text = {};
     };

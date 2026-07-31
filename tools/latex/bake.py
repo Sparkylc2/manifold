@@ -23,11 +23,15 @@ import matplotlib.pyplot as plt
 from matplotlib import font_manager as fm
 
 # ---- config ----
-DPI = 400
+DPI = 900
 COLOR = "white"  # tinted by the engine; white composites against any theme
 FORMATS = ["png"]
 PAD = 0.06
-STROKE = 1.6  # glyph outline (pt) — thickens the math independent of weight
+# Glyph outline (pt). This is a dilation of the outline, so it rounds sharp
+# corners and eats into counters (the enclosed holes in e, a, sigma) -- at 1.6
+# it was visibly softening glyph shapes. Keep it small; 0 gives the truest form
+# and the font is already Semibold.
+STROKE = 0.5
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "equations")
@@ -68,13 +72,20 @@ def setup_font():
     return name
 
 
+# matplotlib drops vertices from paths by default, which flattens the curves in
+# glyph outlines. These are baked once and read as art, so keep every vertex.
+matplotlib.rcParams["path.simplify"] = False
+matplotlib.rcParams["path.simplify_threshold"] = 0.0
+
+
 def render(name, latex):
     expr = latex.strip()
     if not expr.startswith("$"):
         expr = "$" + expr + "$"
     fig = plt.figure(figsize=(0.01, 0.01))
-    t = fig.text(0, 0, expr, color=COLOR, fontsize=48)
-    t.set_path_effects([pe.withStroke(linewidth=STROKE, foreground=COLOR)])
+    t = fig.text(0, 0, expr, color=COLOR, fontsize=64)
+    if STROKE > 0:
+        t.set_path_effects([pe.withStroke(linewidth=STROKE, foreground=COLOR)])
     for fmt in FORMATS:
         fig.savefig(
             os.path.join(OUT, name + "." + fmt),

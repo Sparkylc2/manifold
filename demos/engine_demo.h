@@ -386,7 +386,7 @@ class EngineDemo : public DemoBase {
             double a1_cw = cw_start + (cw_end - cw_start) * (i + 1) / cw_segs;
             for (double cr = FlyR * 0.5; cr <= FlyR * 0.85; cr += 0.04) {
                 r->draw_line(std::cos(a0) * cr, std::sin(a0) * cr,
-                             std::cos(a1_cw) * cr, std::sin(a1_cw) * cr, 2.5f,
+                             std::cos(a1_cw) * cr, std::sin(a1_cw) * cr, 1.0f,
                              fg);
             }
         }

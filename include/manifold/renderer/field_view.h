@@ -32,6 +32,9 @@ class FieldView {
   public:
     // sample(wx, wy, value, alpha): value -> colormap, alpha -> opacity
     using Sample = std::function<void(double, double, double &, double &)>;
+    // for fields whose colour is not a function of one scalar, so no colormap
+    // and no meaningful colourbar
+    using ColorSample = std::function<void(double, double, Color &, double &)>;
 
     FieldView() = default;
     ~FieldView();
@@ -46,9 +49,14 @@ class FieldView {
     // origin = world coords of the field's bottom-left; cell = world units/cell
     void render(Renderer *r, double ox, double oy, double cell,
                 const Sample &sample);
+    void render(Renderer *r, double ox, double oy, double cell,
+                const ColorSample &sample);
 
   private:
     int ss() const;
+
+    void blit(Renderer *r, double ox, double oy, double cell,
+              const ColorSample &sample);
 
     // gamma + colormap; shared by the field
     Color color_at(double t) const;

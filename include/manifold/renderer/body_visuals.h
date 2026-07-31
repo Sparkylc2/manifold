@@ -13,6 +13,7 @@ struct BodyStyle {
     bool show_center = true; // disk: orientation tick; others: center dot
     float border_width = 0.02f;
     bool show_shadow = true;
+    double roundedness = 1.0f;
 };
 
 struct PivotStyle {

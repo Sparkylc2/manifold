@@ -88,6 +88,13 @@ void LayeredRenderer::draw_rect(double x, double y, double w, double h,
     push(resolve(Layer::Content), c);
 }
 
+void LayeredRenderer::draw_rounded_rect(double x, double y, double w, double h,
+                                        Color color, double theta, double r) {
+    Cmd c{Op::RoundRect};
+    c.a = x, c.b = y, c.c = w, c.d = h, c.e = theta, c.f = r, c.col = color;
+    push(resolve(Layer::Content), c);
+}
+
 void LayeredRenderer::draw_arrow(double x0, double y0, double x1, double y1,
                                  double thickness, Color color) {
     push(resolve(Layer::Content),
@@ -272,6 +279,9 @@ void LayeredRenderer::execute(const Cmd &c) {
         break;
     case Op::Rect:
         m_inner->draw_rect(c.a, c.b, c.c, c.d, c.col, c.e);
+        break;
+    case Op::RoundRect:
+        m_inner->draw_rounded_rect(c.a, c.b, c.c, c.d, c.col, c.e, c.f);
         break;
     case Op::Arrow:
         m_inner->draw_arrow(c.a, c.b, c.c, c.d, c.e, c.col);

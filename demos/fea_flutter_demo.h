@@ -2,10 +2,13 @@
 
 #include <manifold/coupling/fea_body_boundary.h>
 #include <manifold/coupling/fea_fluid_load.h>
+#include <manifold/coupling/fea_spring_force.h>
 #include <manifold/fea/fea_solver.h>
 #include <manifold/fluid/mac_fluid_solver.h>
 #include <manifold/fluid/solid_shapes.h>
 #include <manifold/fluid/stable_fluid_solver.h>
+#include <manifold/renderer/annotation_visuals.h>
+#include <manifold/renderer/constraint_visuals.h>
 #include <manifold/renderer/demo_base.h>
 #include <manifold/renderer/field_view.h>
 #include <manifold/renderer/plot_widget.h>
@@ -48,19 +51,27 @@ class FeaFlutterDemo : public DemoBase {
     static constexpr double VM_SMOOTH = 0.2; // temporal ema for the stress map
     static constexpr int FADE_PX = 16;
 
-    // proper no-through BC (cut the solid out of the pressure solve)
-    // over-reacts to boundary motion, so the two-way load is under-relaxed to
-    // hold off the added-mass instability. one-way needs no relaxation
     static constexpr double RELAX_TWOWAY = 0.25;
 
-    enum class Drive { TwoWay, Wake };
+    static constexpr double SPR_BASE_X = 3.00, SPR_BASE_Y = 2.60;
+    static constexpr int J_LOW = NH / 3, J_HIGH = 2 * NH / 3;
+    static constexpr double SPR_K = 1000.0, SPR_C = 40.0;
+    static constexpr double RELAX_SPRINGS = 0.01;
+    static constexpr double SPR_LOAD_SCALE = 30.0;
+    static constexpr double SPR_ANCHOR_X = 0.35;
+    static constexpr double VM_MAX_SPRINGS = 9000.0;
+
+    enum class Drive { TwoWay, Wake, Springs };
+
+    void set_drive(Drive d) { m_drive = d; }
+    Drive drive() const { return m_drive; }
 
     const char *name() const override { return "FEA Flutter"; }
 
     void initialize() override {
         m_stam.clear();
         m_stam.set_channel(INFLOW);
-        m_stam.set_solid_project(m_solid_bc); // proper no-through BC
+        m_stam.set_solid_project(m_solid_bc);
         m_mac.clear();
         m_mac.set_channel(INFLOW);
 
@@ -77,18 +88,12 @@ class FeaFlutterDemo : public DemoBase {
         m_load =
             std::make_unique<Coupling::FeaFluidLoad>(m_fluid, m_body.get());
         m_load->set_sample_offset(1.5 * CELL);
-        m_load->set_relax(m_drive == Drive::TwoWay ? RELAX_TWOWAY : 1.0);
+        apply_load_tuning();
 
         rebind_boundaries();
 
-        m_field.init(COLS, ROWS,
-                     {.supersample = SS,
-                      .edge_fade_px = FADE_PX,
-                      .gamma = 0.32,
-                      .colorbar = true},
-                     Rendering::speed_ramp());
-        m_field.set_scale(0.0, 2.0 * INFLOW, "speed");
-
+        m_field_ready =
+            false; // FieldView needs GL, so its deferred to first render
         m_tip_plot.configure("tip dx", Rendering::palette::accent2(), 900);
         m_tip_plot.clear();
         m_t = 0.0;
@@ -97,22 +102,33 @@ class FeaFlutterDemo : public DemoBase {
     void process(double dt) override {
         m_t += dt;
 
-        // dye upstream so the wake reads
-        for (int k = 1; k <= 5; k++) {
-            const int cj = ROWS * k / 6;
-            for (int dj = -1; dj <= 1; dj++)
-                for (int di = 3; di <= 8; di++)
-                    m_fluid->add_density_source(di, cj + dj, 80.0);
+        m_fluid->clear_sources();
+        if (m_drive == Drive::Springs) {
+            // for (int k = 1; k <= 7; k++) {
+            //     const int cj = ROWS * k / 8;
+            //     for (int dj = -1; dj <= 1; dj++)
+            //         m_fluid->add_density_source(3, cj + dj, 90.0);
+            // }
+        } else {
+            for (int k = 1; k <= 5; k++) {
+                const int cj = ROWS * k / 6;
+                for (int dj = -1; dj <= 1; dj++)
+                    for (int di = 3; di <= 8; di++)
+                        m_fluid->add_density_source(di, cj + dj, 80.0);
+            }
         }
 
         m_body->clear_loads();
 
-        // snapshot the deformed shape before the fluid reads the boundary
-        if (m_drive == Drive::TwoWay)
+        if (m_drive != Drive::Wake)
             m_boundary->refresh();
 
         m_fluid->advance(dt);
         m_load->update();
+        if (m_drive == Drive::Springs) {
+            m_spring_low.update();
+            m_spring_high.update();
+        }
         m_body->advance(dt);
 
         const Vector2d tip = m_body->node_position(m_tip);
@@ -128,6 +144,22 @@ class FeaFlutterDemo : public DemoBase {
 
     void render(Rendering::Renderer *r) override {
         draw_grid(r);
+        render_cell(r);
+        render_hud(r);
+        render_plots(r, {&m_tip_plot});
+    }
+
+    void render_cell(Rendering::Renderer *r) override {
+        if (!m_field_ready) {
+            m_field.init(COLS, ROWS,
+                         {.supersample = SS,
+                          .edge_fade_px = FADE_PX,
+                          .gamma = m_drive == Drive::Springs ? 0.29 : 0.32,
+                          .colorbar = false},
+                         Rendering::speed_ramp());
+            m_field.set_scale(0.0, 2.0 * INFLOW, "speed");
+            m_field_ready = true;
+        }
         const Vector2d o = m_fluid->origin();
         const double vmax = 2.0 * INFLOW;
 
@@ -149,26 +181,38 @@ class FeaFlutterDemo : public DemoBase {
         if (m_drive == Drive::Wake)
             r->draw_circle(m_cyl_c.x(), m_cyl_c.y(), CYL_R,
                            Rendering::palette::foreground());
+        if (m_drive == Drive::Springs)
+            draw_supports(r);
 
         draw_beam(r);
+    }
 
+    void render_hud(Rendering::Renderer *r) {
         Rendering::HUDPanel hud(r, 12, 12);
         hud.title("FEA FLUTTER", Rendering::palette::accent2());
         hud.line(Rendering::palette::text(), "tip dx: %+.4f   peak vM: %.0f",
                  m_tip_dx, m_vm_peak);
         hud.line(Rendering::palette::accent3(), "drive: %s   solver: %s",
-                 m_drive == Drive::TwoWay ? "two-way (beam sheds)"
-                                          : "wake (cylinder drives)",
-                 m_use_mac ? "MAC" : "Stam");
+                 drive_name(), m_use_mac ? "MAC" : "Stam");
         hud.line(Rendering::palette::text(), "BC: %s",
                  m_solid_bc ? "solid-project (sealed)" : "penalization (soft)");
         hud.line(Rendering::palette::text(), "E: %.0f   rho_s: %.0f   U: %.1f",
                  E_MOD, RHO_S, INFLOW);
         hud.separator();
-        hud.small_text("[T] drive  [M] solver  [P] BC  [R] reset",
+        hud.small_text("[Left/Right] drive  [M] solver  [P] BC  [R] reset",
                        Rendering::palette::text_dim());
+    }
 
-        render_plots(r, {&m_tip_plot});
+    const char *drive_name() const {
+        switch (m_drive) {
+        case Drive::TwoWay:
+            return "two-way cantilever (beam sheds)";
+        case Drive::Wake:
+            return "wake (cylinder drives cantilever)";
+        case Drive::Springs:
+            return "spring-mounted plate (free-floating)";
+        }
+        return "";
     }
 
     double default_cam_x() const override { return 0.5 * COLS * CELL; }
@@ -184,13 +228,18 @@ class FeaFlutterDemo : public DemoBase {
             return;
         }
 
-        if (r->is_key_pressed(Rendering::keys::T)) {
-            m_drive = (m_drive == Drive::TwoWay) ? Drive::Wake : Drive::TwoWay;
+        int step = 0;
+        if (r->is_key_pressed(Rendering::keys::Right))
+            step = 1;
+        if (r->is_key_pressed(Rendering::keys::Left))
+            step = -1;
+        if (step != 0) {
+            m_drive = (Drive)(((int)m_drive + step + 3) % 3);
             build_beam();
             m_load =
                 std::make_unique<Coupling::FeaFluidLoad>(m_fluid, m_body.get());
             m_load->set_sample_offset(1.5 * CELL);
-            m_load->set_relax(m_drive == Drive::TwoWay ? RELAX_TWOWAY : 1.0);
+            apply_load_tuning();
             m_boundary = std::make_unique<Coupling::FeaBodyBoundary>(
                 m_body.get(), m_chain, 0.5 * BEAM_W);
             rebind_boundaries();
@@ -205,13 +254,11 @@ class FeaFlutterDemo : public DemoBase {
             m_load =
                 std::make_unique<Coupling::FeaFluidLoad>(m_fluid, m_body.get());
             m_load->set_sample_offset(1.5 * CELL);
-            m_load->set_relax(m_drive == Drive::TwoWay ? RELAX_TWOWAY : 1.0);
+            apply_load_tuning();
             m_fluid->clear();
             m_fluid->set_channel(INFLOW);
         }
 
-        // toggle the proper no-through BC. if two-way ever destabilises, this
-        // drops back to soft penalization (leaks a little, but always stable)
         if (r->is_key_pressed(Rendering::keys::P)) {
             m_solid_bc = !m_solid_bc;
             m_stam.set_solid_project(m_solid_bc);
@@ -221,7 +268,6 @@ class FeaFlutterDemo : public DemoBase {
     }
 
   private:
-    // static circle, only used to drive the beam in Wake mode
     class Cylinder : public Fluid::SolidBoundary {
       public:
         Cylinder(const Vector2d *c, double r) : m_c(c), m_r(r) {}
@@ -237,33 +283,48 @@ class FeaFlutterDemo : public DemoBase {
         double m_r;
     };
 
+    void apply_load_tuning() {
+        switch (m_drive) {
+        case Drive::TwoWay:
+            m_load->set_relax(RELAX_TWOWAY);
+            break;
+        case Drive::Wake:
+            m_load->set_relax(1.0);
+            break;
+        case Drive::Springs:
+            m_load->set_relax(RELAX_SPRINGS);
+            m_load->set_scale(SPR_LOAD_SCALE);
+            break;
+        }
+    }
+
     Fluid::FluidSolver *active_fluid() {
         return m_use_mac ? (Fluid::FluidSolver *)&m_mac
                          : (Fluid::FluidSolver *)&m_stam;
     }
 
-    // whichever solid the active drive mode wants, on both solvers so [M] can
-    // hot-swap without rebuilding
     void rebind_boundaries() {
         for (Fluid::FluidSolver *f :
              {(Fluid::FluidSolver *)&m_stam, (Fluid::FluidSolver *)&m_mac}) {
             f->clear_boundaries();
-            if (m_drive == Drive::TwoWay)
-                f->add_boundary(m_boundary.get());
-            else
+            if (m_drive == Drive::Wake)
                 f->add_boundary(m_cylinder.get());
+            else
+                f->add_boundary(m_boundary.get());
         }
     }
 
     void build_beam() {
-        m_base_x = 0.30 * COLS * CELL;
+        const bool spr = m_drive == Drive::Springs;
+        m_base_x = spr ? SPR_BASE_X : 0.30 * COLS * CELL;
+        const double y0 = spr ? SPR_BASE_Y - 0.5 * BEAM_H : 0.0;
 
         FEA::Mesh mesh;
         for (int j = 0; j <= NH; j++)
             for (int i = 0; i <= NW; i++)
                 mesh.add_node(
                     Vector2d(m_base_x - 0.5 * BEAM_W + BEAM_W * i / NW,
-                             BEAM_H * j / NH));
+                             y0 + BEAM_H * j / NH));
 
         auto id = [](int i, int j) { return j * (NW + 1) + i; };
         for (int j = 0; j < NH; j++)
@@ -282,8 +343,18 @@ class FeaFlutterDemo : public DemoBase {
 
         m_body = std::make_unique<FEA::ElasticBody>(mesh, mat);
         m_body->build();
-        for (int i = 0; i <= NW; i++)
-            m_body->set_fixed_node(id(i, 0), mesh.rest(id(i, 0)));
+        if (spr) {
+            m_node_low = id(0, J_LOW);
+            m_node_high = id(0, J_HIGH);
+            m_spring_low = Coupling::FeaSpringForce(
+                mesh.rest(m_node_low), m_body.get(), m_node_low, SPR_K, SPR_C);
+            m_spring_high =
+                Coupling::FeaSpringForce(mesh.rest(m_node_high), m_body.get(),
+                                         m_node_high, SPR_K, SPR_C);
+        } else {
+            for (int i = 0; i <= NW; i++)
+                m_body->set_fixed_node(id(i, 0), mesh.rest(id(i, 0)));
+        }
 
         m_chain.clear();
         for (int j = 0; j <= NH; j++)
@@ -292,35 +363,36 @@ class FeaFlutterDemo : public DemoBase {
         m_tip = id(NW / 2, NH);
         m_rest_tip = mesh.rest(m_tip);
         m_tip_dx = 0.0;
-        m_vm_primed = false; // stress reset, drop the old temporal average
+        m_vm_primed = false;
     }
 
-    // dedicated stress ramp. speed_ramp's low end is the theme background
-    // (near-white in the tan theme), which makes low-stress regions vanish on
-    // the solid. this ramp is a solid navy->red so the tip stays visible
     static Rendering::Color stress_colour(double t) {
         t = std::clamp(t, 0.0, 1.0);
-        const double s[5][3] = {{40, 70, 200},
-                                {40, 190, 200},
-                                {90, 200, 90},
-                                {235, 200, 60},
-                                {230, 70, 60}};
-        const double x = t * 4.0;
-        const int i = std::min(3, (int)x);
+        const double s[3][3] = {
+            {226, 232, 241}, {168, 128, 236}, {236, 88, 216}};
+        const double x = t * 2.0;
+        const int i = std::min(1, (int)x);
         const double f = x - i;
         auto ch = [&](int k) {
             return (unsigned char)(s[i][k] + f * (s[i + 1][k] - s[i][k]));
         };
-        return Rendering::Color{ch(0), ch(1), ch(2), 235};
+        return Rendering::Color{ch(0), ch(1), ch(2), 255};
+    }
+
+    void draw_supports(Rendering::Renderer *r) {
+        for (int node : {m_node_low, m_node_high}) {
+            const Vector2d p = m_body->node_position(node);
+            const Vector2d a(SPR_ANCHOR_X, p.y());
+            Rendering::draw_spring_damper(r, a, p);
+            Rendering::draw_ground_anchor(
+                r, a, {.size = 0.22, .theta = -M_PI / 2, .draw_node = false});
+        }
     }
 
     void draw_beam(Rendering::Renderer *r) {
         const FEA::Mesh &mesh = m_body->mesh();
         const int nn = mesh.node_count();
 
-        // CST stress is piecewise-constant and checkerboards between the two
-        // tris of a cell. average element values onto the nodes for a smooth
-        // field, the standard FEA post-processing step
         m_nodal_vm.assign(nn, 0.0);
         m_nodal_cnt.assign(nn, 0.0);
         for (int e = 0; e < m_body->element_count(); e++) {
@@ -336,7 +408,7 @@ class FeaFlutterDemo : public DemoBase {
                 m_nodal_vm[i] /= m_nodal_cnt[i];
 
         // low-stress nodes (the tip) jitter frame to frame as the beam
-        // vibrates. hold a running average so the colour there is steady
+        // vibrates. holds a running average so the colour there is steady
         if ((int)m_nodal_smooth.size() != nn || !m_vm_primed) {
             m_nodal_smooth = m_nodal_vm;
             m_vm_primed = true;
@@ -346,9 +418,11 @@ class FeaFlutterDemo : public DemoBase {
                     VM_SMOOTH * (m_nodal_vm[i] - m_nodal_smooth[i]);
         }
 
+        const double vm_max =
+            m_drive == Drive::Springs ? VM_MAX_SPRINGS : VM_MAX;
         auto colour = [&](double vm) {
-            double t = std::clamp(vm / VM_MAX, 0.0, 1.0);
-            // smoothstep: flat slope at both ends, so tiny fluctuations near
+            double t = std::clamp(vm / vm_max, 0.0, 1.0);
+            // flat slope at both ends, so tiny fluctuations near
             // zero stress barely move the colour (kills tip flicker)
             t = t * t * (3.0 - 2.0 * t);
             return stress_colour(t);
@@ -366,29 +440,21 @@ class FeaFlutterDemo : public DemoBase {
                 colour(m_nodal_smooth[t.n[1]]), p2.x(), p2.y(),
                 colour(m_nodal_smooth[t.n[2]]));
         }
-
-        // outline so the deformed shape reads against the field
-        for (int i = 0; i < mesh.edge_count(); i++) {
-            const FEA::Edge &ed = mesh.edge(i);
-            const Vector2d p0 = m_body->node_position(ed.n[0]);
-            const Vector2d p1 = m_body->node_position(ed.n[1]);
-            r->draw_smooth_line(p0.x(), p0.y(), p1.x(), p1.y(), 0.022,
-                                Rendering::palette::shadow());
-        }
     }
-
     Fluid::StableFluidSolver m_stam{ROWS,   COLS, CELL,
                                     1.0e-6, 0.0,  Vector2d::Zero()};
     Fluid::MACFluidSolver m_mac{ROWS,   COLS, CELL,
                                 1.0e-6, 0.0,  Vector2d::Zero()};
     Fluid::FluidSolver *m_fluid = nullptr;
     bool m_use_mac = false;
-    bool m_solid_bc = true; // proper no-through BC on the Stam solver
+    bool m_solid_bc = true;
 
     std::unique_ptr<FEA::ElasticBody> m_body;
     std::unique_ptr<Coupling::FeaBodyBoundary> m_boundary;
     std::unique_ptr<Coupling::FeaFluidLoad> m_load;
     std::unique_ptr<Cylinder> m_cylinder;
+    Coupling::FeaSpringForce m_spring_low, m_spring_high;
+    int m_node_low = 0, m_node_high = 0;
 
     std::vector<int> m_chain;
     Drive m_drive = Drive::TwoWay;
@@ -408,6 +474,7 @@ class FeaFlutterDemo : public DemoBase {
     bool m_vm_primed = false;
 
     Rendering::FieldView m_field;
+    bool m_field_ready = false;
     Rendering::PlotWidget m_tip_plot;
 };
 

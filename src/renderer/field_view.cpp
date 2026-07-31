@@ -34,6 +34,24 @@ void FieldView::set_scale(double vmin, double vmax, const char *label) {
 
 void FieldView::render(Renderer *r, double ox, double oy, double cell,
                        const Sample &sample) {
+    blit(r, ox, oy, cell,
+         [this, &sample](double wx, double wy, Color &c, double &a) {
+             double val = 0.0;
+             sample(wx, wy, val, a);
+             c = color_at(val);
+         });
+
+    if (m_settings.colorbar)
+        draw_colorbar(r);
+}
+
+void FieldView::render(Renderer *r, double ox, double oy, double cell,
+                       const ColorSample &sample) {
+    blit(r, ox, oy, cell, sample);
+}
+
+void FieldView::blit(Renderer *r, double ox, double oy, double cell,
+                     const ColorSample &sample) {
     const int tw = m_cols * ss(), th = m_rows * ss();
     const double w = m_cols * cell, h = m_rows * cell;
 
@@ -41,9 +59,9 @@ void FieldView::render(Renderer *r, double ox, double oy, double cell,
         for (int tx = 0; tx < tw; ++tx) {
             const double wx = ox + ((tx + 0.5) / tw) * w;
             const double wy = oy + (1.0 - (ty + 0.5) / th) * h;
-            double val = 0.0, a = 1.0;
-            sample(wx, wy, val, a);
-            const Color c = color_at(val);
+            Color c{0, 0, 0, 255};
+            double a = 1.0;
+            sample(wx, wy, c, a);
             const double alpha =
                 std::clamp(a, 0.0, 1.0) * edge_fade(tx, ty, tw, th);
             m_pixels[(size_t)tx + (size_t)ty * tw] = {
@@ -62,9 +80,6 @@ void FieldView::render(Renderer *r, double ox, double oy, double cell,
         r->draw_texture(m_tex.id, tw, th, tlx, tly, brx - tlx, bry - tly,
                         false);
     }
-
-    if (m_settings.colorbar)
-        draw_colorbar(r);
 }
 
 int FieldView::ss() const { return std::max(1, m_settings.supersample); }

@@ -86,6 +86,14 @@ void TransformRenderer::draw_rect(double x, double y, double w, double h,
                        theta);
 }
 
+// r is scale-free (a fraction of min(w,h)), so it passes straight through
+void TransformRenderer::draw_rounded_rect(double x, double y, double w,
+                                          double h, Color color, double theta,
+                                          double r) {
+    m_inner->draw_rounded_rect(tx(x), ty(y), m_scale * w, m_scale * h,
+                               fade(color), theta, r);
+}
+
 void TransformRenderer::draw_arrow(double x0, double y0, double x1, double y1,
                                    double thickness, Color color) {
     m_inner->draw_arrow(tx(x0), ty(y0), tx(x1), ty(y1), thickness,
