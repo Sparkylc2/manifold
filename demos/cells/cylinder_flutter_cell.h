@@ -87,13 +87,15 @@ class CylinderFlutterCell : public ShowcaseCell {
     // to drawn x, recentred so the cell sits about its own origin.
     //
     // Two constraints tie this cell to the nozzle beside it:
-    //   HEAD  matches the fraction of the nozzle's bounds its body occupies
-    //         above the exit (15.5%), so equal slot yf/hf lands the exit level
-    //         with this inlet.
+    //   HEAD  matches the fraction of the nozzle's bounds that sits above its
+    //         exit plane (17.995% -- at ART_GAIN 2.0 the whole F-22 art is
+    //         0.786 world units and sits entirely upstream of the exit, given
+    //         0.79 of a 4.39 tall cell), so equal slot yf/hf lands the exit
+    //         level with this inlet. Re-derive on any ART_GAIN change.
     //   SPAN_W is chosen so the two cells share an aspect ratio. Without
     //         that, equal on-screen width would need unequal hf, which breaks
     //         the vertical alignment above.
-    static constexpr double HEAD = 0.155 / 0.845 * W;
+    static constexpr double HEAD = 0.16084 / 0.83916 * W;
 
     Bounds bounds() const override { return {-0.5 * H, -W, 0.5 * H, HEAD}; }
 

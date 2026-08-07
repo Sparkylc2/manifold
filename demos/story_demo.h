@@ -1,12 +1,13 @@
 #pragma once
 
-#include "cells/beam_flutter_cell.h"
 #include "cells/cell_adapters.h"
 #include "cells/cylinder_flutter_cell.h"
 
+#include "aerofoil_flutter_demo.h"
 #include "cart_double_pendulum_demo.h"
 #include "engine_demo.h"
 #include "esn_karman_demo.h"
+#include "fea_flutter_demo.h"
 #include "info_demo.h" // InfoFlutterCell, InfoCrank, InfoPendulum
 #include "jansen_demo.h"
 #include "nozzle_demo.h"
@@ -229,8 +230,23 @@ class StoryDemo : public DemoBase {
                  // axes on the shared crank centre, the axle
                  // both leg pairs hang off. patch dropped and
                  // widened to sit under the whole stride
-                 {&m_jansen, 0.40, 0.125, 0.58, 0.20, true, -1.0, 0.0, -6.2,
-                  0.0, -2.5, 6.6, 5.3, 1.25, 1.22, 0.0, 0.35},
+                 {.cell = &m_jansen,
+                  .xf = 0.40,
+                  .yf = 0.125,
+                  .wf = 0.58,
+                  .hf = 0.20,
+                  .grid = true,
+                  .cap_yf = -1.0,
+                  .gx = 0.0,
+                  .gy = -5.75,
+                  .gcx = 0.0,
+                  .gcy = -2.5,
+                  .ghw = 6.6,
+                  .ghh = 5.3,
+                  .gspacing = 1.25,
+                  .gaxis_reach = 1.22,
+                  .ox = 0.0,
+                  .oy = 0.35},
                  // x-axis on the rail the cart runs along,
                  // y-axis on the setpoint. patch pushed right
                  // so the positive side has room for the nudge
@@ -238,23 +254,33 @@ class StoryDemo : public DemoBase {
                  // double pendulum needed a taller box than the single, so
                  // counting commas to find hf is asking for it. axes still sit
                  // on the rail; the patch is squarer because the swing is
+                 // the cell is 8.9 x 7.3, aspect 1.22. at the old wf = 0.50 it
+                 // was WIDTH-limited (wf/(hf*16/9) = 1.125 < 1.22), so hf did
+                 // nothing for its size. widening wf past 1.22*hf*16/9 flips it
+                 // to height-limited, and only then does hf scale it
+                 // pushed left to mirror the Jansen's offset above, which sits
+                 // +0.19 off centre. The cart draws 2.30x wider than the
+                 // Jansen (0.706 against 0.307), so a true mirror would put it
+                 // at 0.31 and overflow the strip by 0.043 -- this is as far as
+                 // it goes at this size, landing at -0.117 with a 0.03 margin.
+                 // wf is trimmed to 0.75 so height still binds (0.0981 against
+                 // 0.1042); anything below ~0.71 flips it to width-limited and
+                 // hf stops controlling the size.
                  {.cell = &m_cart,
-                  .xf = 0.00,
-                  .yf = 0.40,
-                  .wf = 0.50,
-                  .hf = 0.25,
+                  .xf = 0.0081,
+                  .yf = 0.35,
+                  .wf = 0.75,
+                  .hf = 0.32,
                   .grid = true,
                   .cap_yf = -1.0,
                   .gx = 0.0,
-                  .gy = CartDoublePendulumDemo::GroundY,
+                  .gy = CartDoublePendulumDemo::GroundY - 0.05,
                   .gcx = 0.0,
-                  .gcy = 0.60,
-                  .ghw = 3.40,
+                  .gcy = 0.30,
+                  .ghw = 4.00,
                   .ghh = 3.20,
                   .gspacing = 1.05},
-                 // origin at the bottom-left of the flywheel;
-                 // a square out to about the right piston, with
-                 // a little negative axis showing
+
                  {&m_engine, 0.40, 0.70, 0.58, 0.22, true, -1.0, -1.45, -1.45,
                   0.70, 0.70, 2.40, 2.40, 0.85},
              },
@@ -266,26 +292,34 @@ class StoryDemo : public DemoBase {
             {at(2),
              at(3),
              {
-                 {&m_beam, 0.04, 0.055, 0.92, 0.23, false, -1.0},
-                 // equal yf/hf so the nozzle exit lands level with the
-                 // cylinder inlet; both are height-limited in their slots, so
-                 // each fills the slot height exactly and the two line up
-                 // designated, not positional: Slot has 21 fields now and
-                 // setting `group` positionally means writing out the 13
-                 // between it and cap_yf
-                 {.cell = &m_flutter,
-                  .xf = 0.01,
-                  .yf = 0.4,
-                  .wf = 0.65,
-                  .hf = 0.6,
+                 {.cell = &m_beam,
+                  .xf = 0.04,
+                  .yf = 0.055,
+                  .wf = 0.92,
+                  .hf = 0.23,
                   .grid = false,
                   .cap_yf = -1.0,
                   .group = -1},
+                 // Stacked, not side by side: the nozzle runs horizontally as a
+                 // band, the aerofoil sits centred underneath. Both slots are
+                 // symmetric about 0.5 and anchor 0.5 centres the cell inside
+                 // its slot, so both land dead centre without needing xf tuned.
+                 // Both are height-limited, so hf alone sets their size:
+                 //   nozzle    0.7154 x 0.3378 sw, y 0.310 .. 0.500
+                 //   aerofoil  0.4469 x 0.8000 sw, y 0.530 .. 0.980
                  {.cell = &m_nozzle,
-                  .xf = 0.545,
-                  .yf = 0.4,
-                  .wf = 0.44,
-                  .hf = 0.6,
+                  .xf = -0.17,
+                  .yf = -0.05,
+                  .wf = 1.0,
+                  .hf = 1.0,
+                  .grid = false,
+                  .cap_yf = -1.0,
+                  .group = 1},
+                 {.cell = &m_flutter,
+                  .xf = 0.03,
+                  .yf = 0.53,
+                  .wf = 0.94,
+                  .hf = 0.45,
                   .grid = false,
                   .cap_yf = -1.0,
                   .group = -1},
@@ -299,7 +333,10 @@ class StoryDemo : public DemoBase {
         m_frames.push_back({at(3),
                             at(4),
                             {
-                                {&m_pod, 0.00, 0.02, 1.00, 0.42, false, -1.0},
+                                // width-limited (slot ratio 1.18 vs cell
+                                // aspect 2.12), so wf sets the size: inset a
+                                // little rather than spanning the full strip
+                                {&m_pod, 0.06, 0.02, 0.88, 0.42, false, -1.0},
                                 {&m_esn, 0.02, 0.48, 0.62, 0.24, false, -1.0},
                             },
                             "",
@@ -455,8 +492,26 @@ class StoryDemo : public DemoBase {
 
     // ---- cells ----
 
-    BeamFlutterCell m_beam;
-    CylinderFlutterCell m_flutter;
+    // the spring-mounted plate now lives in FeaFlutterDemo as its third drive
+    // mode, so the reel runs the real demo through render_cell() instead of a
+    // parallel copy of the same setup. bounds are the fluid domain
+    DemoCell<FeaFlutterDemo> m_beam{
+        {0.0, 0.0, FeaFlutterDemo::COLS *FeaFlutterDemo::CELL,
+         FeaFlutterDemo::ROWS *FeaFlutterDemo::CELL},
+        6.0, // the street has to shed and the plate find its offset
+        "spring-mounted flutter",
+        [](FeaFlutterDemo &d) { d.set_drive(FeaFlutterDemo::Drive::Springs); }};
+    // The aerofoil replaces the cylinder in the same slot: it states its domain
+    // with the same SPAN_L/SPAN_W/RES, so its bounds and HEAD come out
+    // identical and the aspect it shares with the nozzle is unchanged. The
+    // cell renders the same picture -- same ramp, same VMAX, same alpha, same
+    // spring furniture -- with a NACA 2412 in place of the disk.
+    DemoCell<AerofoilFlutterDemo> m_flutter{
+        {-0.5 * AerofoilFlutterDemo::H, -AerofoilFlutterDemo::W,
+         0.5 * AerofoilFlutterDemo::H, AerofoilFlutterDemo::HEAD},
+        8.0,
+        "aeroelastic flutter",
+        [](AerofoilFlutterDemo &d) { d.set_quarter_turn(true); }};
 
     LegacyCell<ShowcaseRadial> m_radial{
         {-1.8, -1.8, 1.8, 1.8}, 1.0, "radial engine"};
@@ -466,29 +521,48 @@ class StoryDemo : public DemoBase {
     // bounds are the drawn extent, not the demo's camera framing — the reel
     // fits these into a slot and the demo's own default_cam_* never applies
     DemoCell<JansenDemo> m_jansen{{-4.4, -7.4, 4.4, 2.8}, 2.0, "Jansen walker"};
-    // measured, not eyeballed: over kick 1 + the hold the cell draws
-    // x [-3.17, 3.42], y [-3.63, 1.75] (cart, wheels, both bars, tip disk and
-    // the force arrow). the links pass through horizontal and below during the
-    // kick, so a box drawn round the upright pair would spill over the caption.
-    // warmup 0 because the swing-up IS the shot — warming past it would open
-    // on a pendulum already balanced.
-    // NOTE: kick 2 currently escapes and runs the cart out to x = 5.9, well
-    // past this box. That is the unfinished controller, not a bad bound.
+    // sized for L = 1.30 links: a link reaches 2.6 m from a pivot whose own
+    // travel peaks near 0.9 m, so x lands about +-3.5; y is +-2.6 plus the tip
+    // disk. tightened from the L = 1.75 box, which would now leave the cell
+    // drawn far smaller than its slot allows.
+    // warmup 0 because the swing-up IS the shot; warming past it would open on
+    // a pendulum already balanced
     DemoCell<CartDoublePendulumDemo> m_cart{
-        {-3.4, -3.7, 3.5, 3.9}, 0.0, "double-pendulum swing-up"};
+        {-3.6, -2.9, 3.6, 2.9},
+        0.0,
+        "double-pendulum swing-up",
+        [](CartDoublePendulumDemo &d) { d.set_stage_kicks(true); }};
     DemoCell<EngineDemo> m_engine{{-2.7, -1.4, 2.7, 3.5}, 1.5, "V-twin engine"};
 
     // rotated a quarter turn, so the plume runs down the frame: the field
-    // spans (-R, -NX*CELL)..(R, 0) once turned. the +y extent is the nozzle
-    // hardware upstream of the exit plane — it tracks draw_nozzle's xh
+    // spans (-R, -NX*CELL)..(R, 0) once turned. +y is the F-22 art, which now
+    // sits wholly upstream of the exit plane: 0.786 at ART_GAIN 2.0, so 0.79
+    // with slack. Bump this and HEAD together whenever ART_GAIN moves.
+    // x is padded past the field's own +-1.008 purely to hold this cell's
+    // aspect equal to the flutter cell's, which is what lets one shared hf
+    // give both slots the same drawn size. That half-width works out to
+    // SPAN_W * 3.60 / SPAN_L / 2 and is INDEPENDENT of how tall the art is —
+    // resizing the art moves the +y bound and CylinderFlutterCell::HEAD, never
+    // this number
+    // upright now: the plume runs along +x across the frame instead of down it,
+    // so the field spans (0, -R)..(NX*CELL, R) and +x of the exit. -x is the
+    // art upstream of the exit plane (0.655 at ART_GAIN 2.0) plus a little
+    // slack; the art's chevron overhangs 0.149 downstream, already inside the
+    // field. Cell is 4.270 x 2.016, aspect 2.118 -- wide, which is what lets it
+    // sit as a band above the aerofoil
     DemoCell<NozzleDemo> m_nozzle{
-        {-0.96, -3.60, 0.96, 0.46}, 4.0, "nozzle", [](NozzleDemo &d) {
-            d.set_quarter_turn(true);
+        {-0.670, -1.008, 3.600, 1.008}, 4.0, "nozzle", [](NozzleDemo &d) {
+            d.set_quarter_turn(false);
         }};
 
-    // POD/ESN extents include the mode panels and the reconstruction row, not
-    // just the flow field
-    DemoCell<PODKarmanDemo> m_pod{{-9.0, -13.0, 22.0, 5.5}, 30.0, "POD modes"};
+    // POD's cell layout is the compact one: live | reconstruction side by side
+    // over a row of four modes, each with a vertical KE bar. Extent is
+    // x [-9.0, 22.5], y [-10.3, 4.5] -- the mode row spans exactly the width of
+    // the pair above it, by construction
+    DemoCell<PODKarmanDemo> m_pod{
+        {-9.0, -10.4, 22.5, 4.6}, 30.0, "POD modes", [](PODKarmanDemo &d) {
+            d.set_auto_reveal(true);
+        }};
     DemoCell<ESNKarmanDemo> m_esn{
         {-9.0, -10.5, 12.0, 6.0}, 40.0, "echo-state forecast"};
 

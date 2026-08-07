@@ -16,3 +16,7 @@ x show an integrator circuit with op-amps
 - see if we can maybe create an "autopilot" guidance system, simulate a rocket launch with a full state model and do guidance using an atmosphere and space model
 x create a simple 2D FEA solver with coupling
 - simulate convective and conductive heat transfer through an fea to simulate stuff such as a heater, or radiator
+
+
+
+- fix the compile time issues (move everything to cpp files?)

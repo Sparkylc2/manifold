@@ -1,8 +1,13 @@
 #pragma once
 
+#include "manifold/renderer/theme.h"
 #include "manifold/solver/forces/impulse.h"
 #include "manifold/solver/forces/uniform_gravity.h"
+#include <cstdio>
+#include <iostream>
 #include <manifold/control/pid.h>
+#include <manifold/renderer/annotation_visuals.h>
+#include <manifold/renderer/body_visuals.h>
 #include <manifold/renderer/constraint_visuals.h>
 #include <manifold/renderer/demo_base.h>
 #include <manifold/solver/constraints/fixed_rotation_constraint.h>
@@ -26,14 +31,33 @@ class CartPendulumDemo : public DemoBase {
   public:
     static constexpr double CartMass = 5.0;
     static constexpr double CartWidth = 1.2;
-    static constexpr double CartHeight = 0.5;
+    static constexpr double CartHeight = 0.34;
     static constexpr double PendulumMass = 1.0;
     static constexpr double PendulumLen = 3.0;
-    static constexpr double PendulumWidth = 0.12;
+    static constexpr double PendulumWidth = 0.085;
     static constexpr double Gravity = 9.81;
     static constexpr int SimSteps = 100;
 
     static constexpr double KickForce = -135.0;
+    static constexpr double WheelR = 0.13;
+    // the grid's x-axis should read as the ground the wheels roll on, so it
+    // sits a wheel below the cart body rather than through its centre of mass
+    static constexpr double GroundY =
+        -(CartHeight * 0.5 + 2.0 * WheelR + 0.035);
+
+    // Procedural nudge. Specified as an *impulse* (N s) over a duration,
+    // because that is what actually moves the system: the old one-frame
+    // arm/disarm applied its force for a single dt, so 110 N was 110/240 =
+    // 0.46 N s and raising the number barely moved the needle. A half-sine
+    // push over ~0.3 s delivers two orders more for a smaller peak force, and
+    // gives the controller something continuous to fight.
+    void set_auto_kick(double first_at, double period, double impulse_ns,
+                       double duration = 0.30) {
+        m_kick_at = first_at;
+        m_kick_period = period;
+        m_kick_dur = std::max(1e-3, duration);
+        m_kick_amp = impulse_ns / (m_kick_dur * 2.0 / M_PI);
+    }
 
     enum class TunerTarget { Angle, Position };
     enum class TunerParam { Kp, Ki, Kd };
@@ -105,12 +129,29 @@ class CartPendulumDemo : public DemoBase {
         m_plot_force.clear();
         m_plot_energy.clear();
         m_last_force = 0;
+        m_force_shown = 0.0;
+        m_force_vel = 0.0;
+        m_force_peak = 0.0;
+        m_kick_until = -1.0;
+        m_t = 0.0;
 
         clear_overlays();
         Rendering::register_constraint_overlays(*this, m_system);
     }
 
     void process(double dt) override {
+        m_t += dt;
+        if (m_kick_at > 0.0 && m_t >= m_kick_at) {
+            m_kick_until = m_t + m_kick_dur;
+            m_kick_at = m_kick_period > 0.0 ? m_t + m_kick_period : 0.0;
+        }
+        if (m_t < m_kick_until) {
+            // half-sine, so it eases in and out rather than stepping
+            const double u = 1.0 - (m_kick_until - m_t) / m_kick_dur;
+            m_kick.arm_force(Vector2d(
+                m_kick_amp * std::sin(M_PI * std::clamp(u, 0.0, 1.0)), 0.0));
+        }
+
         double angle_err = angle_error(m_pendulum.theta, M_PI / 2.0);
         double pos_err = 0.0 + m_cart.p.x();
 
@@ -120,6 +161,20 @@ class CartPendulumDemo : public DemoBase {
 
         m_control_force.set_force(Vector2d(force, 0));
         m_last_force = force;
+
+        // second-order critically damped follower: the arrow eases up to the
+        // command and eases back, instead of tracking its chatter. an EMA
+        // lagged but still stepped; this ramps
+        const double wn = 14.0;
+        const double acc =
+            wn * wn * (m_last_force - m_force_shown) - 2.0 * wn * m_force_vel;
+        m_force_vel += acc * dt;
+        m_force_shown += m_force_vel * dt;
+
+        // slowly-decaying peak, so the arrow spans its full length range
+        // whatever the controller's actual force scale turns out to be
+        m_force_peak = std::max(std::abs(m_force_shown),
+                                m_force_peak * std::exp(-0.25 * dt));
 
         m_system.process(dt, SimSteps);
         m_kick.disarm();
@@ -136,39 +191,7 @@ class CartPendulumDemo : public DemoBase {
 
     void render(Rendering::Renderer *r) override {
         draw_grid(r);
-
-        r->draw_line(-30, 0, 30, 0, 3.0f, Rendering::palette::grid_axis());
-        r->draw_line(0, -0.3, 0, 0.3, 2.0f, Rendering::palette::accent3());
-
-        double wr = 0.12;
-        r->draw_circle(m_cart.p.x() - CartWidth * 0.35, -CartHeight * 0.5 - wr,
-                       wr, Rendering::palette::text_dim());
-        r->draw_circle(m_cart.p.x() + CartWidth * 0.35, -CartHeight * 0.5 - wr,
-                       wr, Rendering::palette::text_dim());
-
-        r->draw_bar(m_cart.p.x(), m_cart.p.y(), 0, CartWidth, CartHeight,
-                    Rendering::palette::foreground(),
-                    Rendering::palette::shadow());
-
-        r->draw_bar(m_pendulum.p.x(), m_pendulum.p.y(), m_pendulum.theta,
-                    PendulumLen, PendulumWidth, Rendering::palette::accent2(),
-                    Rendering::palette::shadow());
-
-        Vector2d piv;
-        m_cart.local_to_world(Vector2d(0, 0), &piv);
-        r->draw_circle(piv.x(), piv.y(), 0.09, Rendering::palette::accent1());
-
-        Vector2d tip;
-        m_pendulum.local_to_world(Vector2d(PendulumLen / 2.0, 0), &tip);
-        r->draw_circle(tip.x(), tip.y(), 0.07, Rendering::palette::accent3());
-
-        if (std::abs(m_last_force) > 1.0) {
-            double s = 0.005;
-            r->draw_arrow(m_cart.p.x(), m_cart.p.y() - CartHeight * 0.8,
-                          m_cart.p.x() + m_last_force * s,
-                          m_cart.p.y() - CartHeight * 0.8, 2.0f,
-                          Rendering::palette::accent1());
-        }
+        render_cell(r);
 
         render_hud(r);
         render_tuner(r);
@@ -176,6 +199,125 @@ class CartPendulumDemo : public DemoBase {
         std::vector<PlotWidget *> plots = {&m_plot_angle, &m_plot_cart,
                                            &m_plot_force, &m_plot_energy};
         render_plots(r, plots);
+    }
+
+    void render_cell(Rendering::Renderer *r) override {
+        const auto fg = Rendering::palette::foreground();
+        const auto dim = Rendering::palette::text_dim();
+        const auto a1 = Rendering::palette::accent1();
+        const auto a2 = Rendering::palette::accent2();
+        const auto a3 = Rendering::palette::accent3();
+        const auto blue = Rendering::palette::accent4();
+
+        // draw_reference(r, a3);
+
+        // wheels, dropped clear of the body's outline thickness
+        const double wy = -CartHeight * 0.5 - WheelR - 0.035;
+        // rolling without slipping: moving +x spins the wheel clockwise, which
+        // is negative in a y-up frame. draw_disk draws its spoke at -theta, so
+        // it is handed -a to line up with the dot
+        const double a = -m_cart.p.x() / WheelR;
+        for (int sgn = -1; sgn <= 1; sgn += 2) {
+            const double wx = m_cart.p.x() + sgn * CartWidth * 0.34;
+            Rendering::draw_body_disk(r, wx, wy, WheelR, -a,
+                                      {.fill = dim, .show_shadow = true});
+            r->draw_circle(wx + 0.55 * WheelR * std::cos(a),
+                           wy + 0.55 * WheelR * std::sin(a), 0.028, fg);
+        }
+
+        Rendering::draw_body_block_circular(r, m_cart.p, CartWidth, CartHeight,
+                                            0.0, {.show_shadow = true});
+
+        Rendering::draw_body_bar(
+            r, m_pendulum.p, PendulumLen, PendulumWidth, m_pendulum.theta,
+            {.fill = a2, .show_center = false, .show_shadow = true});
+
+        Vector2d piv;
+        m_cart.local_to_world(Vector2d(0, 0), &piv);
+        Vector2d tip;
+        m_pendulum.local_to_world(Vector2d(PendulumLen / 2.0, 0), &tip);
+
+        Rendering::draw_body_disk(r, tip, 0.13, m_pendulum.theta,
+                                  {.fill = a3, .show_shadow = true});
+
+        Rendering::draw_body_disk(r, piv, 0.085, 0,
+                                  {.show_center = false,
+                                   .fill = Rendering::palette::accent2(),
+                                   .show_shadow = true});
+
+        // Rendering::draw_pin_joint(
+        //     r, piv, {.radius = 0.085, .fill =
+        //     Rendering::palette::accent2()});
+
+        if (std::abs(m_cart.p.x()) > 0.02)
+            Rendering::draw_displacement(r, -0.04, GroundY, m_cart.p.x(),
+                                         GroundY, "x = %.2f m", m_cart.p.x(),
+                                         2.0f, a1, 0.0, {.offset = -0.62});
+
+        // control effort. the raw command chatters, so this is an EMA — an
+        // arrow that flickers reads as noise rather than as a quantity — and
+        // it is length-proportional with a floor so the head stays legible
+        // normalised against the running peak rather than a fixed newton
+        // reference: a hard clamp floor is what made this look like one fixed
+        // length, because the real command sits well under any guess at range
+        const double ref = std::max(m_force_peak, 1.0);
+        const double u = std::clamp(std::abs(m_force_shown) / ref, 0.0, 1.0);
+        if (u > 0.02) {
+            const double len = CartWidth * (0.09 + 1.15 * std::pow(u, 0.7));
+            const double dir = m_force_shown > 0 ? 1.0 : -1.0;
+            // starts at the cart face the force pushes toward, so it reads as
+            // a load on the body rather than a floating annotation
+            const double x0 = m_cart.p.x() + dir * (CartWidth * 0.5 + 0.145);
+            const double ay = m_cart.p.y();
+            draw_vector(r, x0, ay, dir * len, 0.0, 3.0f, blue);
+
+            Rendering::LayerScope txt(r, Rendering::Layer::Text);
+            char buf[24];
+            std::snprintf(buf, sizeof buf, "%.0f N", m_force_shown);
+            int sx, sy;
+            r->world_to_screen(x0 + dir * len, ay, &sx, &sy);
+            const int tw = r->measure_text(buf, 11);
+            r->draw_text(buf, dir > 0 ? sx + 7 : sx - tw - 7, sy - 6, 11, blue);
+        }
+    }
+
+    // Renderer::draw_arrow puts a fixed 12 *screen* px head on the end, so at
+    // this scale a short vector was head and nothing else. This keeps the head
+    // proportional to the vector in world units, so length reads as magnitude.
+    static void draw_vector(Rendering::Renderer *r, double x0, double y0,
+                            double dx, double dy, float thickness,
+                            Rendering::Color c) {
+        const double len = std::hypot(dx, dy);
+        if (len < 1e-6)
+            return;
+        const double ux = dx / len, uy = dy / len;
+        const double head = std::clamp(0.22 * len, 0.06, 0.28);
+        const double hw = head * 0.46;
+
+        const double bx = x0 + dx - ux * head, by = y0 + dy - uy * head;
+        const double theta = std::atan2(by, bx);
+        const double length = std::sqrt(bx * bx + by * by);
+        r->draw_line(x0, y0, bx, by, thickness, c);
+        r->draw_triangle(x0 + dx, y0 + dy, bx - uy * hw, by + ux * hw,
+                         bx + uy * hw, by - ux * hw, c);
+    }
+
+    // dashed setpoint marker, label upright and set off to the left so it
+    // reads against the grid rather than on top of the pendulum
+    void draw_reference(Rendering::Renderer *r, Rendering::Color c) const {
+        // hangs below the origin, a little past the displacement annotation's
+        // own extension lines (offset -0.62) so it reads as the datum they
+        // are measured from
+        const double y0 = GroundY, y1 = GroundY - 0.80;
+        const double dash = 0.09, gap = 0.075;
+        for (double y = y0; y > y1; y -= dash + gap)
+            r->draw_line(0.0, y, 0.0, std::max(y - dash, y1), 1.4f, c);
+
+        Rendering::LayerScope txt(r, Rendering::Layer::Text);
+        int sx, sy;
+        r->world_to_screen(0.0, y1, &sx, &sy);
+        const int w = r->measure_text("ref", 12);
+        r->draw_text("ref", sx - w - 7, sy - 5, 12, c);
     }
 
   protected:
@@ -187,7 +329,7 @@ class CartPendulumDemo : public DemoBase {
                        r->is_key_down(Rendering::keys::RightShift);
             const Vector2d disp = m_pendulum.p - m_cart.p;
             const double theta = std::atan2(disp.y(), disp.x());
-            Vector2d force_n = {std::cos(theta), std::sin(theta)};
+            Vector2d force_n = {-std::sin(theta), std::cos(theta)};
             m_kick.arm_force(rev ? -KickForce * force_n : KickForce * force_n);
         }
 
@@ -369,6 +511,10 @@ class CartPendulumDemo : public DemoBase {
     double m_kp_p = 3.0, m_ki_p = 0.2, m_kd_p = 5.0;
 
     double m_last_force = 0;
+    double m_t = 0.0;
+    double m_kick_at = 0.0, m_kick_period = 0.0;
+    double m_kick_dur = 0.30, m_kick_amp = 0.0, m_kick_until = -1.0;
+    double m_force_shown = 0.0, m_force_vel = 0.0, m_force_peak = 0.0;
 
     TunerTarget m_tuner_target = TunerTarget::Angle;
     TunerParam m_tuner_param = TunerParam::Kp;

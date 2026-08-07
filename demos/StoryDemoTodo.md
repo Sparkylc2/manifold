@@ -18,17 +18,34 @@
 
 # 1.
 ## jansen
-- axes not in the correct position, feet need to be on axis
+- done
 ## cart kickup
-- looks good, but we should add a final kick at the end to show it balancing (have the kick show up with a different coloured vector)
-- move axes down a few pixels so the wheels are on the axis
+- done
 ## engine
 - looks good, done
 
 # 2
 ## fea flutter
-- colours look shit for the beam, maybe we add text at the top with "stress",
-- is having two separate colour bars right next to the flow a good idea?
-## cylinder flutter
-- replace with aerofoil
+- fix the amount but lwkey lets just leave it at that. we can fuck with it once we slow down speed
+- change to "fluid\n speed" and "stress" on the bottom
+## foil flutter
+- looks good, just sizing
+## nozzle
+- definitely in the video have it sped up a bit
+- draw the nozzle procedurally, looks weird right now
+
+# 3
+## pod 
+- do we want the bars to only occupy ~half if at 46% KE? right now they maximize
+- outside of that, good, colours are ice, idea is pretty polished off. maybe fix the sizing of the 
+bar so they align with the size of the box aorund the mode (which its slightly larger right now)
+
+## esn + lstm
+- we will have both fully trained and fitted properly, and show a live reconstruction going forward however many seconds, as well as a reconstruction error plot
+- will run next to eachother at the same time, just do what the current esn demo does
+
+
+# 4
+wave pde plot, maybe a vector field plot with attractors or some other weird math object but rendered beautifully, and then maybe something else
+ 
 

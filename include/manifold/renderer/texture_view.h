@@ -11,6 +11,7 @@ namespace manifold::Rendering {
 
 struct TextureViewSettings {
     bool bilinear = true;       // texture filter
+    bool mipmaps = false;
     double sx = 1.0;            // world units per texel, x
     double sy = 1.0;            // world units per texel, y
     Layer layer = Layer::Field; // paint layer (Field = under content)

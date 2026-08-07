@@ -1,6 +1,5 @@
 add_executable(manifold main.cpp ../../src/app/raygui_impl.cpp)
-find_package(Threads REQUIRED)
-target_link_libraries(manifold PRIVATE manifold_solver manifold_control manifold_pde manifold_ai manifold_fea manifold_renderer raygui Threads::Threads)
+target_link_libraries(manifold PRIVATE manifold_demos)
 target_include_directories(manifold PRIVATE ${CMAKE_SOURCE_DIR}/include)
 
 # copy assets next to executable

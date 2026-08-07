@@ -5,6 +5,7 @@
 
 namespace manifold::Solver {
 using namespace Eigen;
+
 struct RigidBody {
   public:
     RigidBody();
@@ -29,3 +30,5 @@ struct RigidBody {
 };
 
 } // namespace manifold::Solver
+//
+//

@@ -1,0 +1,11 @@
+#include "../aerofoil_flutter_demo.h"
+
+#include "../demo_factories.h"
+
+namespace manifold::Demo {
+
+std::unique_ptr<DemoBase> make_aerofoil_flutter_demo() {
+    return std::make_unique<AerofoilFlutterDemo>();
+}
+
+} // namespace manifold::Demo

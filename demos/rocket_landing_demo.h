@@ -16,6 +16,7 @@
 #include <manifold/renderer/demo_base.h>
 #include <manifold/renderer/field_view.h>
 #include <manifold/renderer/hud_panel.h>
+#include <manifold/renderer/interpolation.h>
 #include <manifold/solver/collision.h>
 #include <manifold/solver/forces/direct_force.h>
 #include <manifold/solver/forces/uniform_gravity.h>
@@ -25,6 +26,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -72,36 +74,61 @@ class RocketLandingDemo : public DemoBase {
     // whenever |vx| ~ 0.4, so the outer loop ran bang-bang against the clamp
     // and the whole vehicle limit-cycled -- that, not the attitude loop, was
     // most of the wobble. these keep the tilt command inside the limit
-    static constexpr double KP_LAT = 0.25;
-    static constexpr double KD_LAT = 0.45;
+    static constexpr double KP_LAT = 0.18;
+    static constexpr double KD_LAT = 0.55;
     static constexpr double TILT_MAX = 0.3;
+    // flare: fade the lateral tilt command out over the last stretch so the
+    // vehicle stands up before it touches. landing tilted puts the contact
+    // patch off to one side and the thrust vector then topples it
+    static constexpr double H_FLARE = 0.9;
 
     // attitude loop: realised by the analog PID card below the insets
     // (1 V == 1 rad). the gains become component values, so what's drawn is
     // what flies.
     // pitch authority is a = r_nozzle * T / I ~ 31 1/s^2, and the gimbal is
-    // limited to 0.22 rad, so peak angular accel is only ~6.7 rad/s^2. that
-    // makes this loop rate-dominated by necessity: Kd is what keeps pitch rate
-    // inside what the gimbal can arrest. the D branch therefore taps the
-    // measurement, not the error -- derivative-on-error would differentiate the
-    // guidance handoff step and slam the gimbal to the stop for no benefit.
+    // limited to 0.22 rad, so peak angular accel is only ~6.7 rad/s^2.
+    //
+    // the gains are set by what the actuator can actually do, not by how tight
+    // the loop could look on paper: omega_n = sqrt(a*Kp) ~ 6.5 rad/s at
+    // zeta ~ 1.1, which keeps |Kp*e| inside the stop for errors up to ~9 deg.
+    // pushing Kp to 8 (as before) saturates the gimbal at 1.6 deg of error, so
+    // the loop stops being linear and just slams between the stops.
+    //
+    // the D branch taps the measurement, not the error: derivative-on-error
+    // would differentiate the guidance handoff step for no benefit. TAU_D is
+    // deliberately slack -- the gimbal is only updated once per control tick,
+    // and a rate path with a corner above the tick rate turns sampling jitter
+    // into chatter.
     // I is weak and leaky: attitude has no steady torque bias to trim, and an
     // ideal op-amp integrator with real authority just winds up
-    static constexpr double KP_ATT = 8.0;
-    static constexpr double KD_ATT = 5.0;
-    static constexpr double KI_ATT = 0.15;
+    static constexpr double KP_ATT = 1.35;
+    static constexpr double KD_ATT = 0.42;
+    static constexpr double KI_ATT = 0.10;
     static constexpr double TAU_D = 0.03;   // rate filter (Rs*Cd)
     static constexpr double TAU_LEAK = 0.5; // integrator leak (Rl*Ci)
-    static constexpr double TAU_CMD = 0.10; // attitude command shaping
+    static constexpr double TAU_CMD = 0.15; // attitude command shaping
+    // actuator slew limit. sized well above what the loop needs
+    // (|gimbal|*omega_n ~ 1.5 rad/s): a rate limit anywhere near the loop's own
+    // demand adds enormous phase lag and drives exactly the bang-bang
+    // oscillation it looks like it should damp
+    static constexpr double GIMBAL_RATE = 6.0; // rad/s
+
+    // the controller runs on its own fixed tick, so behaviour doesn't change
+    // with render frame rate (at 60 fps a frame-rate loop samples the rate path
+    // 4x coarser than at 240 and rings)
+    static constexpr double CTRL_DT = 1.0 / 240.0;
 
     // exhaust injection into the MAC smoke field
-    static constexpr double EXHAUST_SPEED = 20.0;
-    static constexpr int PLUME_CELLS = 6;
+    // injection is deliberately strong: the exhaust has to visibly reach the
+    // bar and pool on it, since that plume is the whole reason the bar heats
+    static constexpr double EXHAUST_SPEED = 26.0;
+    static constexpr int PLUME_CELLS = 11;
+    static constexpr double PLUME_WIDTH = 2;  // half-width in cells
     static constexpr double DYE_DECAY = 0.6;  // 1/s, dye fade rate
-    static constexpr double HEAT_RATE = 24.0; // plume temperature source (T/s)
+    static constexpr double HEAT_RATE = 70.0; // plume temperature source (T/s)
     static constexpr double TEMP_AMBIENT = 0.0;
-    static constexpr double TEMP_RELAX = 0.1; // air newton cooling (1/s)
-    static constexpr double VORT_EPS = 0.12;  // MAC vorticity confinement
+    static constexpr double TEMP_RELAX = 0.05; // air newton cooling (1/s)
+    static constexpr double VORT_EPS = 0.12;   // MAC vorticity confinement
 
     // landing bar (shared mesh: thermal + elastic), top face on y = 0
     static constexpr double PLAT_W = W; // full flow-field width
@@ -141,21 +168,24 @@ class RocketLandingDemo : public DemoBase {
     static constexpr double VMAX = 5.0;
     static constexpr double PERT_MIN = 0.10;
     static constexpr double PERT_REF = 1.40;
-    static constexpr double TEMP_MAX = 0.3; // temperature colour scale
-    static constexpr double VM_MAX = 2.0e4; // von Mises colour ceiling
+    static constexpr double TEMP_MAX = 0.8;     // bar temperature colour scale
+    static constexpr double TEMP_AIR_MAX = 3.0; // exhaust temperature scale
+    static constexpr double VM_MAX = 2.0e4;     // von Mises colour ceiling
     static constexpr double INSET_K = 0.46; // inset scale (true 1:1 miniature)
     static constexpr int FADE_PX = 18;
 
     // landing latch. the descent is commanded at TOUCH_SPEED, so this can only
     // trip once contact has actually arrested the vehicle
     static constexpr double LAND_V = 0.30;
-    static constexpr double LAND_TILT = 0.12;
-    static constexpr double LAND_VTH = 0.35; // rad/s
+    static constexpr double LAND_TILT = 0.18;
+    static constexpr double LAND_VTH = 0.40; // rad/s
 
     const char *name() const override { return "Rocket Landing"; }
-    double default_cam_x() const override { return 0.0; }
-    double default_cam_y() const override { return 1.4; }
-    double default_cam_zoom() const override { return 39.0; }
+    // framed for 9:16: the whole column (rocket, bar, insets, PID card) spans
+    // roughly y in [+5.5, -9.9] and x in [-3.6, +3.9]
+    double default_cam_x() const override { return 0.15; }
+    double default_cam_y() const override { return -2.35; }
+    double default_cam_zoom() const override { return 44.0; }
 
     void initialize() override {
         // slender rocket outline (nose +y), recentred on its centroid so p ==
@@ -189,6 +219,7 @@ class RocketLandingDemo : public DemoBase {
         m_cmd_T = 0.0;
         m_pad_load = 0.0;
         m_time = 0.0;
+        m_ctrl_accum = 0.0;
 
         m_pid = std::make_unique<AttPidCircuit>(KP_ATT, KI_ATT, KD_ATT, TAU_D,
                                                 TAU_LEAK);
@@ -245,8 +276,19 @@ class RocketLandingDemo : public DemoBase {
                       .edge_fade_px = FADE_PX,
                       .gamma = 0.29,
                       .colorbar = true},
-                     air_ramp());
+                     Rendering::speed_ramp());
         m_field.set_scale(0.0, VMAX, "speed");
+
+        // the hot jet, drawn over the speed field. this is the layer that makes
+        // the coupling legible: you see the exhaust reach the bar and the bar's
+        // top face heat up in the same frame
+        m_hot.init(FCOLS, ROWS,
+                   {.supersample = SS,
+                    .edge_fade_px = FADE_PX,
+                    .gamma = 0.55,
+                    .colorbar = false},
+                   air_temp_ramp());
+        m_hot.set_scale(0.0, TEMP_AIR_MAX, "exhaust T");
     }
 
     void process(double dt) override {
@@ -297,6 +339,14 @@ class RocketLandingDemo : public DemoBase {
                                           0.0, 1.0);
                        });
 
+        m_hot.render(r, o.x(), o.y(), CELL,
+                     [this](double wx, double wy, double &val, double &a) {
+                         const double T = m_fluid.temperature_at(
+                             Vector2d(wx, wy), Fluid::Interp::Cubic);
+                         val = T / TEMP_AIR_MAX;
+                         a = std::clamp(T / (0.30 * TEMP_AIR_MAX), 0.0, 1.0);
+                     });
+
         compute_nodal_vm();
         draw_bar(r);
         draw_rocket(r);
@@ -328,35 +378,35 @@ class RocketLandingDemo : public DemoBase {
     }
     static int node_id(int i, int j) { return j * (NPX + 1) + i; }
 
-    // PID card rows (world y, under the insets). 2.1 apart: a stage needs room
-    // for its feedback element (0.95 + half a body) plus the ~0.59 its in+
-    // ground stub hangs below the row
-    static constexpr double PID_Y_P = -2.4;
-    static constexpr double PID_Y_I = -4.5;
-    static constexpr double PID_Y_D = -6.6;
+    // PID card: routed with a tight deadzone and a gap between facing pins of
+    // at least 2*PID_DZ, so stubs never overshoot into a glyph
+    static constexpr double PID_DZ = 0.22;
+    static constexpr double PID_GAP = 0.30;
+    // top of the card, clear of the inset panels above it
+    static constexpr double PID_TOP = -2.35;
 
-    // the attitude controller as hardware. a unity difference amp forms the
-    // error, then P / I / D branches feed an inverting summer:
+    // the attitude controller as hardware: an inverting error summer, then
+    // P / I / D branches into a second inverting summer, giving
     //   OUT = -Kp e - Ki int e + Kd theta'
     // which is the gimbal command directly, no output inverter needed.
     //
-    // two sign details drive the topology. the summer inverts, so P and I hang
-    // off the error node (which carries -e) while D hangs off the *measurement*
-    // (+theta) -- D on the error node would land the rate term as positive
-    // feedback and tip the vehicle over. and the error stage has to be a real
-    // difference amp, not a grounded-in+ summer, precisely so the measurement
-    // is available as +theta for that D tap.
+    // the sign bookkeeping is what fixes the topology. both summers invert, so
+    // P and I hang off the error node (which carries -e), while D must see
+    // *+theta* -- fed from the error node the rate term arrives as positive
+    // feedback and tips the vehicle over. so the attitude sensor is modelled as
+    // what a real one is: a differential pair, -theta into the error summer and
+    // +theta into the rate path.
     // 1 V == 1 rad, gains on a 10k base
-    // nodes: 0 cmd  1 theta  2 errA in-  3 errA in+  4 -err  5 sumP  6 P
+    // nodes: 0 cmd  1 -theta  2 +theta  3 sumA  4 -err  5 sumP  6 P
     //        7 sumI  8 I  9 dmid  10 sumD  11 D  12 sumS  13 OUT
     struct AttPidCircuit {
         Electrical::CircuitSystem sys;
-        Electrical::VoltageSource v_sp, v_m;
-        Electrical::Resistor ra1, ra2, rga, rfa, rp, rfp, ri, rli, rsd, rfd,
-            rs1, rs2, rs3, rfs;
+        Electrical::VoltageSource v_cmd, v_nm, v_pm;
+        Electrical::Resistor ra1, ra2, rfa, rp, rfp, ri, rli, rsd, rfd, rs1,
+            rs2, rs3, rfs;
         Electrical::Capacitor ci, cd;
         Electrical::OpAmpIdeal oa, op, oi, od, os;
-        double u_sp = 0.0, u_m = 0.0;
+        double u_cmd = 0.0, u_th = 0.0;
 
         // Rli across Ci makes the I branch a leaky integrator: without it an
         // ideal op-amp integrator winds up without bound (nothing in the
@@ -372,35 +422,36 @@ class RocketLandingDemo : public DemoBase {
                 e.m_a = a, e.m_b = b, e.m_c = f;
                 sys.add_element(&e);
             };
-            auto O = [this](Electrical::OpAmpIdeal &e, int in_p, int in_n,
-                            int out) {
-                e.m_in_p = in_p, e.m_in_n = in_n, e.m_out = out;
+            auto O = [this](Electrical::OpAmpIdeal &e, int in_n, int out) {
+                e.m_in_p = -1, e.m_in_n = in_n, e.m_out = out;
                 sys.add_element(&e);
             };
-            v_sp.m_a = 0, v_sp.m_b = -1;
-            v_sp.m_fv = [this](double) { return u_sp; };
-            sys.add_element(&v_sp);
-            v_m.m_a = 1, v_m.m_b = -1;
-            v_m.m_fv = [this](double) { return u_m; };
-            sys.add_element(&v_m);
-            R(ra1, 0, 2, RB), R(rfa, 2, 4, RB); // in- leg + feedback
-            R(ra2, 1, 3, RB), R(rga, 3, -1, RB); // in+ divider
-            O(oa, 3, 2, 4);                      // v4 = theta - cmd = -e
+            auto V = [this](Electrical::VoltageSource &e, int a,
+                            std::function<double()> f) {
+                e.m_a = a, e.m_b = -1;
+                e.m_fv = [f](double) { return f(); };
+                sys.add_element(&e);
+            };
+            V(v_cmd, 0, [this] { return u_cmd; });
+            V(v_nm, 1, [this] { return -u_th; });
+            V(v_pm, 2, [this] { return u_th; });
+            R(ra1, 0, 3, RB), R(ra2, 1, 3, RB), R(rfa, 3, 4, RB);
+            O(oa, 3, 4); // v4 = -(cmd - theta) = -e
             R(rp, 4, 5, RB), R(rfp, 5, 6, kp * RB);
-            O(op, -1, 5, 6);
+            O(op, 5, 6);
             R(ri, 4, 7, 1.0 / (ki * CI)), C(ci, 7, 8, CI);
             R(rli, 7, 8, tau_leak / CI);
-            O(oi, -1, 7, 8);
-            C(cd, 1, 9, CD); // rate path: tapped off +theta
+            O(oi, 7, 8);
+            C(cd, 2, 9, CD); // rate path, off +theta
             R(rsd, 9, 10, tau_d / CD), R(rfd, 10, 11, kd / CD);
-            O(od, -1, 10, 11);
+            O(od, 10, 11);
             R(rs1, 6, 12, RB), R(rs2, 8, 12, RB), R(rs3, 11, 12, RB);
             R(rfs, 12, 13, RB);
-            O(os, -1, 12, 13);
+            O(os, 12, 13);
             sys.set_substep_dt(5e-5);
         }
 
-        void set_input(double cmd, double theta) { u_sp = cmd, u_m = theta; }
+        void set_input(double cmd, double theta) { u_cmd = cmd, u_th = theta; }
         double out() const { return sys.node_voltage(13); }
     };
 
@@ -457,159 +508,215 @@ class RocketLandingDemo : public DemoBase {
         }
     }
 
-    // schematic + scopes for the card. columns are derived so every wire is a
-    // straight run or one elbow: element pin + deadzone stub lands exactly on
-    // the next column's junction
+    // schematic + scopes for the card, laid out vertically (signal flows down)
+    // so the whole thing fits a 9:16 frame beside the scene.
+    //
+    // every op-amp is rotated -90deg, which puts both inputs on top and the
+    // output on the bottom. the layout is derived from the pin geometry rather
+    // than hand-placed: rows are chained through GAP so facing pins are always
+    // at least two deadzones apart (closer and the routed stubs overshoot each
+    // other and poke through the glyph), and each stage's feedback element is
+    // scaled to span exactly its op-amp's input-to-output height, so the
+    // feedback wire is two short horizontal rails instead of a detour.
     void build_pid_panel() {
         using Rendering::Glyph;
         m_schem = Rendering::CircuitSchematic{};
         m_schem.ortho = true;
-        m_schem.deadzone = 0.3;
+        m_schem.deadzone = PID_DZ;
         m_scopes.clear();
 
         AttPidCircuit &c = *m_pid;
-        const double sOp = 1.3, sEl = 1.2, sSrc = 0.9, sHalf = 0.62;
-        const double rows[3] = {PID_Y_P, PID_Y_I, PID_Y_D};
-        const double DZ = m_schem.deadzone;
-        // an op-amp's inverting input sits at (-0.5, +0.22)*scale; every stage
-        // is built so a pin's deadzone stub lands exactly on the next column,
-        // which is what keeps the routing to straight runs and single elbows
-        const double opInDx = 0.5 * sOp, opInDy = 0.22 * sOp;
-        const double opOutDx = 0.62 * sOp;
-        const double elHalf = 0.5 * sEl;
+        const double DZ = PID_DZ, GAP = PID_GAP;
+        const double sOp = 0.76, sR = 0.56, sV = 0.58, sC = 0.46;
+        const double inDy = 0.22 * sOp, inDx = 0.22 * sOp;
+        const double outDy = 0.62 * sOp;
+        const double sFb = inDy + outDy; // feedback spans input row -> output
+        const double FBX = 0.44;         // feedback column offset from op-amp
+        const double TR = -M_PI / 2;     // inputs up, output down
 
-        auto add = [&](Glyph g, double x, double y, Electrical::Element *e,
-                       double s) {
-            return m_schem.add(g, Vector2d(x, y), 0.0, e, s);
+        // vertical two-terminal: pin 0 on top, pin 1 on the bottom
+        auto vert = [&](Glyph g, double x, double yc, Electrical::Element *e,
+                        double s) {
+            return m_schem.add(g, Vector2d(x, yc), TR, e, s);
+        };
+        auto opamp = [&](double x, double y, Electrical::Element *e) {
+            const int i = m_schem.add(Glyph::OpAmp, Vector2d(x, y), TR, e, sOp);
+            m_schem.placements[i].ground_inp = true;
+            return i;
+        };
+        // a source lying flat, ground on its left, signal leaving to the right
+        // and turning down into `col`
+        auto src = [&](double col, double y, Electrical::Element *e) {
+            return m_schem.add(Glyph::VoltageSource,
+                               Vector2d(col - DZ - 0.5 * sV, y), -M_PI, e, sV);
         };
 
-        // ---- error stage: unity difference amp ----
-        const double xOA = -4.3;
-        const double yErrIn = PID_Y_I + opInDy;  // in-  (upper)
-        const double yErrP = PID_Y_I - opInDy;   // in+  (lower)
-        const double colA = xOA - opInDx - DZ;   // summing/divider column
-        const double xRa = colA - DZ - elHalf;   // input resistor centres
-        const double xSrc = xRa - elHalf - 0.55; // sources
-        const int vsp = m_schem.add(Glyph::VoltageSource, {xSrc, yErrIn}, -M_PI,
-                                    &c.v_sp, sSrc);
-        const int vm = m_schem.add(Glyph::VoltageSource, {xSrc, yErrP}, -M_PI,
-                                   &c.v_m, sSrc);
-        const int ra1 = add(Glyph::Resistor, xRa, yErrIn, &c.ra1, sEl);
-        const int ra2 = add(Glyph::Resistor, xRa, yErrP, &c.ra2, sEl);
-        const int oa = add(Glyph::OpAmp, xOA, PID_Y_I, &c.oa, sOp);
-        const int rfa = add(Glyph::Resistor, xOA - 0.05, PID_Y_I + 0.95,
-                            &c.rfa, sEl);
-        // in+ divider leg hanging below the in+ pin. -pi/2 so pin 1 is the
-        // lower end, which is where the ground symbol goes
-        const int rga = m_schem.add(Glyph::Resistor, {colA, yErrP - 0.62},
-                                    -M_PI / 2, &c.rga, 0.9);
-        m_schem.connect(vsp, 0, ra1, 0);
-        m_schem.connect(vm, 0, ra2, 0);
+        // ---- rows, chained downward from the top source row ----
+        const double ySrc = PID_TOP;      // sources
+        const double yIn = ySrc - 1.28;   // input element top pins
+        const double yInB = yIn - sR;     //   their bottoms
+        const double yErrIn = yInB - GAP; // error op-amp inputs
+        const double yErrOp = yErrIn - inDy;
+        const double yErrOut = yErrOp - outDy;
+        const double yBus = yErrOut - GAP; // the -err bus
+        const double yBrIn = yBus - GAP;   // branch input top pins
+        const double yBrInB = yBrIn - sR;
+        const double yBrOpIn = yBrInB - GAP; // branch op-amp inputs
+        const double yBrOp = yBrOpIn - inDy;
+        const double yBrOut = yBrOp - outDy;
+        const double ySumR = yBrOut - GAP; // rs2 top pin
+        const double ySumRB = ySumR - sR;
+        const double ySumIn = ySumRB - GAP; // summer inputs
+        const double ySumOp = ySumIn - inDy;
+        const double ySumOut = ySumOp - outDy;
+        const double yLat = ySumRB - 0.15; // P/D summing rails
+
+        // ---- branch columns ----
+        const double bxP = -1.80, bxI = 0.0, bxD = 1.80;
+        const double colP = bxP + inDx, colI = bxI + inDx, colD = bxD + inDx;
+
+        // ---- error stage ----
+        // the two legs drop into one summing node; ra1 sits directly above the
+        // inverting input, ra2 one column to its left
+        const double xOA = 0.0;
+        const double colE = xOA + inDx;
+        const double colE2 = colE - 1.35;
+        // ra2 rides 0.45 higher than ra1 so its cross-column run to the shared
+        // summing node happens well above the inverting-input stub. level with
+        // ra1 the elbow has nowhere to go but double back on itself, and the
+        // run would also graze the in+ ground symbol
+        const double yIn2 = yIn + 0.45;
+        const int ra1 = vert(Glyph::Resistor, colE, yIn - 0.5 * sR, &c.ra1, sR);
+        const int ra2 =
+            vert(Glyph::Resistor, colE2, yIn2 - 0.5 * sR, &c.ra2, sR);
+        const int oa = opamp(xOA, yErrOp, &c.oa);
+        const int rfa = vert(Glyph::Resistor, colE + FBX,
+                             0.5 * (yErrIn + yErrOut), &c.rfa, sFb);
+        // each source's horizontal run is short and its x-span disjoint from
+        // the others', so the stack order is free
+        const int vpm = src(colD, ySrc, &c.v_pm);
+        const int vnm = src(colE2, ySrc - 0.18, &c.v_nm);
+        const int vcmd = src(colE, ySrc - 0.72, &c.v_cmd);
+        m_schem.connect(vcmd, 0, ra1, 0);
+        m_schem.connect(vnm, 0, ra2, 0);
         m_schem.connect(ra1, 1, oa, 1);
+        m_schem.connect(ra2, 1, oa, 1);
         m_schem.connect(rfa, 0, oa, 1);
         m_schem.connect(rfa, 1, oa, 2);
-        m_schem.connect(ra2, 1, oa, 0);
-        m_schem.connect(rga, 0, oa, 0);
-        const int wE = m_schem.add_node({xOA + opOutDx + DZ + 0.25, PID_Y_I}, 4);
-        m_schem.connect_node(oa, 2, wE);
+
+        // ---- the -err bus ----
+        const int wBus = m_schem.add_node({xOA, yBus}, 4);
+        const int wBusP = m_schem.add_node({colP, yBus}, 4);
+        const int wBusI = m_schem.add_node({colI, yBus}, 4);
+        m_schem.connect_node(oa, 2, wBus);
+        m_schem.connect_nodes(wBus, wBusP);
+        m_schem.connect_nodes(wBus, wBusI);
 
         // ---- P / I / D branches ----
-        // feedback above the row where there is room; the two that sit below
-        // (the integrator's leak, and D's) are nudged right so they clear the
-        // in+ ground stub hanging off their own op-amp
-        const double xBr = -0.3;               // branch op-amp column
-        const double colB = xBr - opInDx - DZ; // their summing column
-        const double xIn = colB - DZ - elHalf; // branch input elements
-        Electrical::OpAmpIdeal *ops[3] = {&c.op, &c.oi, &c.od};
-        int opid[3];
-        for (int k = 0; k < 3; ++k) {
-            opid[k] = add(Glyph::OpAmp, xBr, rows[k], ops[k], sOp);
-            m_schem.placements[opid[k]].ground_inp = true;
-        }
-        const int rfp = add(Glyph::Resistor, xBr - 0.05, PID_Y_P + 0.95,
-                            &c.rfp, sEl);
-        const int ci = add(Glyph::Capacitor, xBr - 0.05, PID_Y_I + 0.95, &c.ci,
-                           sEl);
-        const int rli = add(Glyph::Resistor, xBr + 0.18, PID_Y_I - 0.95,
-                            &c.rli, sEl);
-        const int rfd = add(Glyph::Resistor, xBr + 0.18, PID_Y_D - 0.95,
-                            &c.rfd, sEl);
+        const int rp = vert(Glyph::Resistor, colP, yBrIn - 0.5 * sR, &c.rp, sR);
+        const int ri = vert(Glyph::Resistor, colI, yBrIn - 0.5 * sR, &c.ri, sR);
+        // the D input is a series Cd + Rs pair stacked in its column
+        const int rsd =
+            vert(Glyph::Resistor, colD, yBrIn - 0.5 * sR, &c.rsd, sR);
+        const int cd =
+            vert(Glyph::Capacitor, colD, yBrIn + 0.5 * sC, &c.cd, sC);
+        m_schem.connect_node(rp, 0, wBusP);
+        m_schem.connect_node(ri, 0, wBusI);
+        m_schem.connect(cd, 1, rsd, 0); // series butt joint
+        m_schem.connect(vpm, 0, cd, 0); // rate path from +theta
+
+        const int oP = opamp(bxP, yBrOp, &c.op);
+        const int oI = opamp(bxI, yBrOp, &c.oi);
+        const int oD = opamp(bxD, yBrOp, &c.od);
+        m_schem.connect(rp, 1, oP, 1);
+        m_schem.connect(ri, 1, oI, 1);
+        m_schem.connect(rsd, 1, oD, 1);
+
+        const double yFb = 0.5 * (yBrOpIn + yBrOut);
+        const int rfp = vert(Glyph::Resistor, colP + FBX, yFb, &c.rfp, sFb);
+        const int ci = vert(Glyph::Capacitor, colI + FBX, yFb, &c.ci, sFb);
+        const int rli =
+            vert(Glyph::Resistor, colI + FBX + 0.40, yFb, &c.rli, sFb);
+        const int rfd = vert(Glyph::Resistor, colD + FBX, yFb, &c.rfd, sFb);
         const int fb[4] = {rfp, ci, rli, rfd};
-        const int fbop[4] = {0, 1, 1, 2};
+        const int fbop[4] = {oP, oI, oI, oD};
         for (int k = 0; k < 4; ++k) {
-            m_schem.connect(fb[k], 0, opid[fbop[k]], 1);
-            m_schem.connect(fb[k], 1, opid[fbop[k]], 2);
+            m_schem.connect(fb[k], 0, fbop[k], 1);
+            m_schem.connect(fb[k], 1, fbop[k], 2);
         }
 
-        m_pid_lab = Vector2d(xIn - 0.62, 0.0);
-        const int rp = add(Glyph::Resistor, xIn, PID_Y_P, &c.rp, sEl);
-        const int ri = add(Glyph::Resistor, xIn, PID_Y_I, &c.ri, sEl);
-        // D input is a series Cd + Rs pair. placed so Rs's stub lands exactly
-        // on colB and Cd butts against Rs -- otherwise the router emits a
-        // few-hundredths-wide jog where they meet
-        const double xRsd = colB - DZ - 0.5 * sHalf;
-        const int cd = add(Glyph::Capacitor, xRsd - sHalf, PID_Y_D, &c.cd,
-                           sHalf);
-        const int rsd = add(Glyph::Resistor, xRsd, PID_Y_D, &c.rsd, sHalf);
-        m_schem.connect_node(rp, 0, wE);
-        m_schem.connect_node(ri, 0, wE);
-        m_schem.connect(rp, 1, opid[0], 1);
-        m_schem.connect(ri, 1, opid[1], 1);
-        m_schem.connect(cd, 1, rsd, 0);
-        m_schem.connect(rsd, 1, opid[2], 1);
-        // the rate tap: down the measurement column, under the error stage
-        const int wM = m_schem.add_node({xRa - elHalf - DZ, yErrP}, 1);
-        const int wMd = m_schem.add_node({xRa - elHalf - DZ, PID_Y_D}, 1);
-        m_schem.connect_node(ra2, 0, wM);
-        m_schem.connect_nodes(wM, wMd);
-        m_schem.connect_node(cd, 0, wMd);
-
-        // ---- summing stage -> gimbal ----
-        const double xSum = 3.7;
-        const double colS = xSum - opInDx - DZ;
-        const double xRs = colS - DZ - elHalf;
-        Electrical::Resistor *rss[3] = {&c.rs1, &c.rs2, &c.rs3};
-        const int osum = add(Glyph::OpAmp, xSum, PID_Y_I, &c.os, sOp);
-        m_schem.placements[osum].ground_inp = true;
-        for (int k = 0; k < 3; ++k) {
-            const int rs = add(Glyph::Resistor, xRs, rows[k], rss[k], sEl);
-            m_schem.connect(opid[k], 2, rs, 0);
-            m_schem.connect(rs, 1, osum, 1);
-        }
-        const int rfs = add(Glyph::Resistor, xSum - 0.05, PID_Y_I + 0.95,
-                            &c.rfs, sEl);
+        // ---- summing stage ----
+        // rs2 stays in the centre column; rs1/rs3 lie flat on a rail below the
+        // branch outputs and feed the same node from either side
+        const int osum = opamp(xOA - inDx, ySumOp, &c.os);
+        // rs2 sits on the op-amp axis, not the input column, so both the wire
+        // above it and the wire below it are straight vertical runs
+        const int rs2 =
+            vert(Glyph::Resistor, bxI, ySumR - 0.5 * sR, &c.rs2, sR);
+        m_schem.connect(oI, 2, rs2, 0);
+        m_schem.connect(rs2, 1, osum, 1);
+        const int rs1 = m_schem.add(
+            Glyph::Resistor, {bxP + DZ + 0.5 * sR, yLat}, 0.0, &c.rs1, sR);
+        const int rs3 = m_schem.add(
+            Glyph::Resistor, {bxD - DZ - 0.5 * sR, yLat}, M_PI, &c.rs3, sR);
+        m_schem.connect(oP, 2, rs1, 0);
+        m_schem.connect(oD, 2, rs3, 0);
+        m_schem.connect(rs1, 1, osum, 1);
+        m_schem.connect(rs3, 1, osum, 1);
+        const int rfs = vert(Glyph::Resistor, colI + FBX,
+                             0.5 * (ySumIn + ySumOut), &c.rfs, sFb);
         m_schem.connect(rfs, 0, osum, 1);
         m_schem.connect(rfs, 1, osum, 2);
-        const int wout =
-            m_schem.add_node({xSum + opOutDx + DZ + 0.5, PID_Y_I}, 13);
+        const int wout = m_schem.add_node({xOA - inDx, ySumOut - GAP}, 13);
         m_schem.connect_node(osum, 2, wout);
-        m_grounds = {m_schem.pin_world(vsp, 1), m_schem.pin_world(vm, 1),
-                     m_schem.pin_world(rga, 1)};
 
+        m_grounds = {m_schem.pin_world(vcmd, 1), m_schem.pin_world(vnm, 1),
+                     m_schem.pin_world(vpm, 1)};
+
+        // ---- scopes: a column down the right-hand margin ----
         auto scope = [&](int a, int b, Vector2d ctr, double vs,
                          Rendering::Color col, const char *lbl) {
             Rendering::WorldScope s;
-            s.a = a, s.b = b, s.center = ctr, s.size = {1.7, 0.9};
+            s.a = a, s.b = b, s.center = ctr, s.size = {1.4, 0.72};
             s.vscale = vs, s.color = col, s.label = lbl;
             m_scopes.push_back(std::move(s));
         };
-        scope(0, -1, {xSrc + 0.15, PID_Y_P + 0.55}, 0.5,
-              Rendering::palette::accent3(), "cmd");
-        scope(-1, 4, {xSrc + 0.15, PID_Y_D - 0.85}, 0.35,
-              Rendering::palette::accent4(), "err");
-        scope(13, -1, {xSum + 2.9, PID_Y_I}, 0.3,
-              Rendering::palette::accent2(), "gimbal");
-        m_pid_title = Vector2d(xSrc - 0.55, PID_Y_P + 1.55);
+        const double xsc = 3.15;
+        scope(0, -1, {xsc, ySrc - 0.1}, 0.5, Rendering::palette::accent3(),
+              "cmd");
+        scope(-1, 4, {xsc, yBus + 0.30}, 0.35, Rendering::palette::accent4(),
+              "err");
+        scope(13, -1, {xsc, ySumOut}, 0.3, Rendering::palette::accent2(),
+              "gimbal");
+
+        m_pid_title = Vector2d(-3.40, PID_TOP + 0.60);
+        m_pid_lab[0] = Vector2d(bxP - 0.62, yBrOp + 0.05);
+        m_pid_lab[1] = Vector2d(bxI - 0.62, yBrOp + 0.05);
+        m_pid_lab[2] = Vector2d(bxD - 0.62, yBrOp + 0.05);
+        m_pid_bottom = ySumOut - GAP;
     }
 
+    // fixed-rate controller: accumulate render time and tick the guidance +
+    // op-amp card in CTRL_DT slices
     void control(double dt) {
+        m_ctrl_accum += dt;
+        int guard = 0;
+        while (m_ctrl_accum >= CTRL_DT && guard++ < 32) {
+            m_ctrl_accum -= CTRL_DT;
+            control_tick(CTRL_DT);
+        }
+        if (guard >= 32)
+            m_ctrl_accum = 0.0; // very long frame: don't spiral
+    }
+
+    void control_tick(double dt) {
         if (m_landed) {
             m_cmd_T *= std::exp(-dt / LAND_T_TAU); // spool down, don't chop
             if (m_cmd_T < 0.5)
                 m_cmd_T = 0.0;
             m_rocket.v.x() = 0.0; // sit still: no slow drift along the pad
             m_rocket.v_theta = 0.0;
-            command_thrust(m_cmd_T, 0.0);
+            command_thrust(m_cmd_T, 0.0, dt);
             m_theta_cmd = 0.0;
             m_pid->set_input(0.0, 0.0);
             step_pid(dt);
@@ -627,7 +734,8 @@ class RocketLandingDemo : public DemoBase {
         } else {
             const double tilt =
                 KP_LAT * (m_rocket.p.x() - m_pad.x()) + KD_LAT * m_rocket.v.x();
-            theta_des = std::clamp(tilt, -TILT_MAX, TILT_MAX);
+            const double lvl = std::clamp(h / H_FLARE, 0.0, 1.0);
+            theta_des = std::clamp(tilt, -TILT_MAX, TILT_MAX) * lvl;
             T = MASS *
                 std::max(0.0, KP_SINK * (-TOUCH_SPEED - m_rocket.v.y()) + G);
         }
@@ -635,14 +743,14 @@ class RocketLandingDemo : public DemoBase {
         // shape the command before the circuit sees it: the guidance handoff at
         // H_TERMINAL steps theta_des, and a step into a differentiator is a
         // kick the gimbal can't usefully track
-        m_theta_cmd +=
-            wrap_angle(theta_des - m_theta_cmd) * (1.0 - std::exp(-dt / TAU_CMD));
+        m_theta_cmd += wrap_angle(theta_des - m_theta_cmd) *
+                       (1.0 - std::exp(-dt / TAU_CMD));
 
         m_pid->set_input(m_theta_cmd, wrap_angle(m_rocket.theta));
         step_pid(dt);
         const double gim = std::clamp(m_pid->out(), -GIMBAL_MAX, GIMBAL_MAX);
 
-        command_thrust(std::clamp(T, T_MIN, T_MAX), gim);
+        command_thrust(std::clamp(T, T_MIN, T_MAX), gim, dt);
 
         if (h < 0.03 && m_rocket.v.norm() < LAND_V &&
             std::abs(m_rocket.v_theta) < LAND_VTH &&
@@ -656,10 +764,14 @@ class RocketLandingDemo : public DemoBase {
             s.sample(m_pid->sys);
     }
 
-    void command_thrust(double T, double gim) {
+    // the gimbal is a physical actuator: it slews at a finite rate rather than
+    // teleporting to whatever the card asks for this tick. this is also what
+    // stops any residual command chatter from reaching the thrust vector
+    void command_thrust(double T, double gim, double dt) {
         m_cmd_T = T;
         m_throttle = (T_MAX > 0.0) ? T / T_MAX : 0.0;
-        m_gimbal = gim; // derivative filtering lives in the circuit (Rs*Cd)
+        const double dmax = GIMBAL_RATE * dt;
+        m_gimbal += std::clamp(gim - m_gimbal, -dmax, dmax);
         m_thrust.set_force(T * body_up(m_rocket.theta + m_gimbal));
     }
 
@@ -669,13 +781,21 @@ class RocketLandingDemo : public DemoBase {
         Vector2d nz;
         m_rocket.local_to_world(m_nozzle, &nz);
         const Vector2d ex = -body_up(m_rocket.theta + m_gimbal);
+        const Vector2d side(-ex.y(), ex.x());
         const double vmag = EXHAUST_SPEED * m_throttle;
         for (int k = 0; k < PLUME_CELLS; k++) {
-            int i, j;
-            if (!m_fluid.world_to_cell(nz + ex * (k * CELL), &i, &j))
-                continue;
-            m_fluid.add_heat_source(i, j, HEAT_RATE * m_throttle);
-            m_fluid.add_velocity(i, j, vmag * ex.x(), vmag * ex.y());
+            const double fall = 1.0 - 0.55 * k / (double)PLUME_CELLS;
+            for (int w = -PLUME_WIDTH; w <= PLUME_WIDTH; w++) {
+                const double lat = 1.0 - 0.35 * std::abs(w);
+                int i, j;
+                if (!m_fluid.world_to_cell(
+                        nz + ex * (k * CELL) + side * (w * CELL), &i, &j))
+                    continue;
+                m_fluid.add_heat_source(i, j,
+                                        HEAT_RATE * m_throttle * fall * lat);
+                m_fluid.add_velocity(i, j, vmag * fall * lat * ex.x(),
+                                     vmag * fall * lat * ex.y());
+            }
         }
     }
 
@@ -786,46 +906,105 @@ class RocketLandingDemo : public DemoBase {
         (void)dark;
     }
 
-    // gimballed engine: a short mount stem, a parabolic bell hung off the
-    // pivot, and the plume drawn first so the bell overlaps it
+    // gimballed engine, drawn as a half-profile (axial station, half-width)
+    // revolved into a quad strip: injector head -> convergent waist -> flared
+    // bell. flat foreground silhouette with background-coloured gaps for the
+    // section joints, matching the rocket body's fill/edge convention.
     void draw_thruster(Rendering::Renderer *r) {
         Vector2d mount;
         m_rocket.local_to_world(m_nozzle, &mount);
         const Vector2d aft = -body_up(m_rocket.theta);           // body axis
         const Vector2d ex = -body_up(m_rocket.theta + m_gimbal); // exhaust axis
         const Vector2d side(-ex.y(), ex.x());
+        const double eng_th = m_rocket.theta + m_gimbal;
         const Rendering::Color body = Rendering::palette::foreground();
-        const Rendering::Color dark = Rendering::palette::shadow();
+        const Rendering::Color edge = Rendering::palette::background();
 
-        const double stem = 0.045;
-        const Vector2d pivot = mount + aft * stem;
+        // K scales the whole assembly about the mount. the rocket rests with
+        // its base on the pad, so the bell always intersects the deck on
+        // touchdown; RECESS buys some of that back at the cost of burying the
+        // head inside the skirt
+        const double K = 1.0, RECESS = 0.0;
+        const double HEAD = 0.095 * K, CHAM = 0.072 * K, THR = 0.030 * K,
+                     EXIT = 0.140 * K;
+        const double S_HEAD = 0.062 * K, S_CHAM = 0.080 * K, S_THR = 0.140 * K,
+                     S_EXIT = 0.280 * K;
 
-        const double throat = 0.032, exit = 0.068, len = 0.12;
-        if (m_throttle > 0.02)
-            draw_plume(r, pivot + ex * (len * 0.85), ex, side, exit);
+        const Vector2d pivot = mount - ex * (RECESS * K);
 
-        r->draw_line(mount.x(), mount.y(), pivot.x(), pivot.y(), 3.0f, body);
-
-        // bell: parabolic flare sampled into a filled strip + edge contours
-        const int N = 5;
-        Vector2d pl = pivot + side * throat, pr = pivot - side * throat;
-        for (int k = 1; k <= N; k++) {
-            const double t = (double)k / N;
-            const double wk = throat + (exit - throat) * std::pow(t, 0.65);
-            const Vector2d ax = pivot + ex * (len * t);
-            const Vector2d nl = ax + side * wk, nr = ax - side * wk;
-            r->draw_triangle(pl.x(), pl.y(), pr.x(), pr.y(), nr.x(), nr.y(),
-                             dark);
-            r->draw_triangle(pl.x(), pl.y(), nr.x(), nr.y(), nl.x(), nl.y(),
-                             dark);
-            r->draw_line(pl.x(), pl.y(), nl.x(), nl.y(), 1.4f, body);
-            r->draw_line(pr.x(), pr.y(), nr.x(), nr.y(), 1.4f, body);
-            pl = nl, pr = nr;
+        std::vector<Vector2d> prof; // (station along ex, half-width)
+        prof.reserve(16);
+        prof.push_back({0.000, 0.062 * K});
+        prof.push_back({0.012 * K, HEAD});
+        prof.push_back({S_HEAD, HEAD});
+        prof.push_back({S_CHAM, CHAM});
+        const int NC = 4; // cosine convergence gives the reference's waist
+        for (int k = 1; k <= NC; k++) {
+            const double t = (double)k / NC;
+            const double b = 0.5 * (1.0 - std::cos(M_PI * t));
+            prof.push_back(
+                {S_CHAM + (S_THR - S_CHAM) * t, CHAM + (THR - CHAM) * b});
         }
-        r->draw_line(pl.x(), pl.y(), pr.x(), pr.y(), 1.6f, body); // exit lip
-        // throat collar
-        r->draw_rect(pivot.x(), pivot.y(), 2.0 * throat + 0.02, 0.03, body,
-                     m_rocket.theta + m_gimbal);
+        const int NB = 6;
+        for (int k = 1; k <= NB; k++) {
+            const double t = (double)k / NB;
+            prof.push_back({S_THR + (S_EXIT - S_THR) * t,
+                            THR + (EXIT - THR) * std::pow(t, 0.62)});
+        }
+
+        auto hw_at = [&](double s) {
+            for (size_t i = 0; i + 1 < prof.size(); i++)
+                if (s <= prof[i + 1].x()) {
+                    const double d = prof[i + 1].x() - prof[i].x();
+                    const double t = d > 1e-9 ? (s - prof[i].x()) / d : 0.0;
+                    return prof[i].y() + t * (prof[i + 1].y() - prof[i].y());
+                }
+            return prof.back().y();
+        };
+        // section joints: background-coloured slices cut out of the silhouette,
+        // following the local profile so a flaring section is cut cleanly edge
+        // to edge. world units, so they survive any camera zoom
+        auto gap = [&](double s, double t) {
+            const double wa = hw_at(s - t), wb = hw_at(s + t);
+            const Vector2d a = pivot + ex * (s - t), b = pivot + ex * (s + t);
+            const Vector2d al = a + side * wa, ar = a - side * wa;
+            const Vector2d bl = b + side * wb, br = b - side * wb;
+            r->draw_triangle(al.x(), al.y(), ar.x(), ar.y(), br.x(), br.y(),
+                             edge);
+            r->draw_triangle(al.x(), al.y(), br.x(), br.y(), bl.x(), bl.y(),
+                             edge);
+        };
+
+        if (m_throttle > 0.02)
+            draw_plume(r, pivot + ex * (S_EXIT - 0.03 * K), ex, side,
+                       EXIT * 0.80);
+
+        // turbopump feed: an L off the head, kept clear of the silhouette so it
+        // doesn't just vanish into the foreground-filled hull above it
+        const Vector2d tap = pivot + ex * (0.034 * K) + side * (HEAD * 0.9);
+        const Vector2d elb = tap + side * (0.055 * K);
+        const Vector2d man = elb - ex * (0.048 * K);
+        r->draw_smooth_line(tap.x(), tap.y(), elb.x(), elb.y(), 3.4f, body);
+        r->draw_smooth_line(elb.x(), elb.y(), man.x(), man.y(), 3.4f, body);
+        r->draw_rect(man.x(), man.y(), 0.040 * K, 0.026 * K, body, eng_th);
+
+        for (size_t i = 0; i + 1 < prof.size(); i++) {
+            const Vector2d a = pivot + ex * prof[i].x();
+            const Vector2d b = pivot + ex * prof[i + 1].x();
+            const double wa = prof[i].y(), wb = prof[i + 1].y();
+            const Vector2d al = a + side * wa, ar = a - side * wa;
+            const Vector2d bl = b + side * wb, br = b - side * wb;
+            r->draw_triangle(al.x(), al.y(), ar.x(), ar.y(), br.x(), br.y(),
+                             body);
+            r->draw_triangle(al.x(), al.y(), br.x(), br.y(), bl.x(), bl.y(),
+                             body);
+        }
+
+        gap(0.020 * K, 0.004 * K);                       // injector cap plate
+        gap(S_HEAD + 0.008 * K, 0.005 * K);              // head / chamber joint
+        gap(S_THR, 0.005 * K);                           // throat collar
+        gap(S_THR + (S_EXIT - S_THR) * 0.55, 0.004 * K); // bell stiffener
+        gap(S_EXIT - 0.030 * K, 0.004 * K);              // exit lip
     }
 
     // three nested layers, each a slim jet that stays near the exit radius
@@ -835,16 +1014,25 @@ class RocketLandingDemo : public DemoBase {
                     Vector2d side, double w0) {
         const double flick = 1.0 + 0.05 * std::sin(37.0 * m_time) +
                              0.03 * std::sin(61.0 * m_time + 1.7);
-        const double L = (0.28 + 1.05 * m_throttle) * flick;
+        double L = (0.28 + 1.05 * m_throttle) * flick;
+        // stop the flame at the deck: the jet spreading along the bar is the
+        // fluid layer's job, and a polygon drawn through the bar reads as an
+        // error
+        if (ex.y() < -0.05) {
+            const double room = (exit_c.y() - m_floor.point.y()) / (-ex.y());
+            L = std::min(L, std::max(0.04, room));
+        }
 
         struct Layer {
             double wk, lk;
             Rendering::Color col;
         };
+        // accent1 is the theme's hot end; accent4 (pale) reads as the hotter
+        // core, which is also the right way round physically
         const Layer layers[3] = {
-            {1.00, 1.00, fade(Rendering::palette::accent1(), 70)},
-            {0.68, 0.72, fade(Rendering::palette::accent1(), 150)},
-            {0.36, 0.42, fade(Rendering::palette::accent3(), 230)},
+            {1.05, 1.00, fade(Rendering::palette::accent1(), 65)},
+            {0.70, 0.72, fade(Rendering::palette::accent1(), 155)},
+            {0.38, 0.42, fade(Rendering::palette::accent4(), 235)},
         };
         const int N = 10;
         for (const Layer &ly : layers) {
@@ -853,14 +1041,14 @@ class RocketLandingDemo : public DemoBase {
                      pr = exit_c - side * (w0 * ly.wk);
             for (int k = 1; k <= N; k++) {
                 const double s = (double)k / N;
-                const double wk = w0 * ly.wk * (1.0 + 0.45 * s) *
-                                  std::pow(1.0 - s, 0.85);
+                const double wk =
+                    w0 * ly.wk * (1.0 + 0.45 * s) * std::pow(1.0 - s, 0.85);
                 const Vector2d ax = exit_c + ex * (len * s);
                 const Vector2d nl = ax + side * wk, nr = ax - side * wk;
-                r->draw_triangle(pl.x(), pl.y(), pr.x(), pr.y(), nr.x(),
-                                 nr.y(), ly.col);
-                r->draw_triangle(pl.x(), pl.y(), nr.x(), nr.y(), nl.x(),
-                                 nl.y(), ly.col);
+                r->draw_triangle(pl.x(), pl.y(), pr.x(), pr.y(), nr.x(), nr.y(),
+                                 ly.col);
+                r->draw_triangle(pl.x(), pl.y(), nr.x(), nr.y(), nl.x(), nl.y(),
+                                 ly.col);
                 pl = nl, pr = nr;
             }
         }
@@ -978,20 +1166,21 @@ class RocketLandingDemo : public DemoBase {
     }
 
     void draw_pid_panel(Rendering::Renderer *r) {
-        Rendering::draw_circuit(r, m_schem, m_pid->sys, 0.45);
+        const Rendering::CircuitStyle cs = Rendering::CircuitStyle::compact();
+        Rendering::draw_circuit(r, m_schem, m_pid->sys, 0.45, cs);
         for (auto &g : m_grounds)
-            Rendering::draw_ground(r, g);
+            Rendering::draw_ground(r, g, -M_PI / 2, cs);
         for (auto &s : m_scopes)
             s.render(r);
-        ptext(r, m_pid_title.x(), m_pid_title.y(),
-              "ATTITUDE PID   (1 V = 1 rad)", Rendering::palette::text_dim(),
-              15, false);
-        ptext(r, m_pid_lab.x(), PID_Y_P + 0.45, "P",
-              Rendering::palette::accent1(), 16, true);
-        ptext(r, m_pid_lab.x(), PID_Y_I + 0.45, "I",
-              Rendering::palette::accent3(), 16, true);
-        ptext(r, m_pid_lab.x(), PID_Y_D + 0.45, "D",
-              Rendering::palette::accent4(), 16, true);
+        ptext(r, m_pid_title.x(), m_pid_title.y(), "ATTITUDE PID   1 V = 1 rad",
+              Rendering::palette::text_dim(), 14, false);
+        const char *nm[3] = {"P", "I", "D"};
+        const Rendering::Color lc[3] = {Rendering::palette::accent1(),
+                                        Rendering::palette::accent3(),
+                                        Rendering::palette::accent4()};
+        for (int k = 0; k < 3; ++k)
+            ptext(r, m_pid_lab[k].x(), m_pid_lab[k].y(), nm[k], lc[k], 15,
+                  true);
     }
 
     void ptext(Rendering::Renderer *r, double wx, double wy, const char *t,
@@ -1031,57 +1220,42 @@ class RocketLandingDemo : public DemoBase {
         hud.small_text("[R] reset", Rendering::palette::text_dim());
     }
 
-    // air disturbance ramp: dark navy (still) -> blue -> cyan -> amber (fast).
-    // a dark low end (not the theme background) keeps the field from washing
-    // out to white where the flow is slow
-    static Rendering::Colormap air_ramp() {
-        return [](double t) -> Rendering::Color {
+    // all three ramps are palette-derived so the demo tracks the active theme
+    // (the air field uses the same speed_ramp as the karman demo). accent1 is
+    // the theme's "hot" end, so heat and stress both terminate there and are
+    // told apart by their midtones: heat runs through accent4, stress through
+    // accent2 / accent3.
+    // heat ramp, parameterised on the cold end. the air overlay fades from the
+    // background (cold air should read as nothing), but the bar has to start
+    // from something visible or a cold bar disappears into the backdrop
+    static Rendering::Colormap heat_ramp(Rendering::Color cold) {
+        return [cold](double t) -> Rendering::Color {
             t = std::clamp(t, 0.0, 1.0);
-            const double s[4][3] = {
-                {22, 40, 66}, {40, 110, 160}, {90, 195, 205}, {235, 180, 90}};
-            const double x = t * 3.0;
-            const int i = std::min(2, (int)x);
-            const double f = x - i;
-            auto ch = [&](int k) {
-                return (unsigned char)(s[i][k] + f * (s[i + 1][k] - s[i][k]));
-            };
-            return Rendering::Color::rgba(ch(0), ch(1), ch(2), 255);
+            const auto c1 = Rendering::palette::accent4();
+            const auto c2 = Rendering::palette::accent1();
+            return t < 0.45 ? Rendering::color_lerp(cold, c1, t / 0.45)
+                            : Rendering::color_lerp(c1, c2, (t - 0.45) / 0.55);
         };
     }
-
-    // temperature ramp: deep blue (cold) -> cyan -> yellow -> red (hot)
     static Rendering::Colormap temp_ramp() {
-        return [](double t) -> Rendering::Color {
-            t = std::clamp(t, 0.0, 1.0);
-            const double s[4][3] = {
-                {20, 40, 120}, {40, 180, 200}, {235, 205, 60}, {215, 55, 45}};
-            const double x = t * 3.0;
-            const int i = std::min(2, (int)x);
-            const double f = x - i;
-            auto ch = [&](int k) {
-                return (unsigned char)(s[i][k] + f * (s[i + 1][k] - s[i][k]));
-            };
-            return Rendering::Color::rgba(ch(0), ch(1), ch(2), 255);
-        };
+        return heat_ramp(Rendering::palette::grid_axis());
+    }
+    static Rendering::Colormap air_temp_ramp() {
+        return heat_ramp(Rendering::palette::background());
     }
 
-    // stress ramp: navy -> teal -> green -> amber -> red (kept off the temp
-    // ramp)
     static Rendering::Colormap stress_ramp() {
         return [](double t) -> Rendering::Color {
             t = std::clamp(t, 0.0, 1.0);
-            const double s[5][3] = {{40, 70, 200},
-                                    {40, 190, 200},
-                                    {90, 200, 90},
-                                    {235, 200, 60},
-                                    {230, 70, 60}};
-            const double x = t * 4.0;
-            const int i = std::min(3, (int)x);
-            const double f = x - i;
-            auto ch = [&](int k) {
-                return (unsigned char)(s[i][k] + f * (s[i + 1][k] - s[i][k]));
-            };
-            return Rendering::Color::rgba(ch(0), ch(1), ch(2), 255);
+            const auto c0 = Rendering::palette::background();
+            const auto c1 = Rendering::palette::accent2();
+            const auto c2 = Rendering::palette::accent3();
+            const auto c3 = Rendering::palette::accent1();
+            if (t < 0.35)
+                return Rendering::color_lerp(c0, c1, t / 0.35);
+            if (t < 0.7)
+                return Rendering::color_lerp(c1, c2, (t - 0.35) / 0.35);
+            return Rendering::color_lerp(c2, c3, (t - 0.7) / 0.3);
         };
     }
 
@@ -1126,14 +1300,18 @@ class RocketLandingDemo : public DemoBase {
     double m_pad_load = 0.0;  // filtered weight on the bar
     double m_theta_cmd = 0.0; // shaped attitude command into the PID card
     double m_time = 0.0;
+    double m_ctrl_accum = 0.0; // fixed-rate control tick accumulator
 
     std::unique_ptr<AttPidCircuit> m_pid;
     Rendering::CircuitSchematic m_schem;
     std::vector<Rendering::WorldScope> m_scopes;
     std::vector<Vector2d> m_grounds;
-    Vector2d m_pid_title{0.0, 0.0}, m_pid_lab{0.0, 0.0};
+    Vector2d m_pid_title{0.0, 0.0};
+    Vector2d m_pid_lab[3];
+    double m_pid_bottom = 0.0;
 
-    Rendering::FieldView m_field; // top air: speed
+    Rendering::FieldView m_field; // air: speed
+    Rendering::FieldView m_hot;   // air: exhaust temperature, drawn over it
 };
 
 } // namespace manifold::Demo

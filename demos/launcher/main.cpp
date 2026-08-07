@@ -6,7 +6,10 @@
 #include <manifold/renderer/layered_renderer.h>
 #include <manifold/renderer/raylib_renderer.h>
 
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <memory>
@@ -23,8 +26,28 @@ int main(int argc, char *argv[]) {
     std::string launch_id;
     bool direct_launch = false;
 
+    // fixed sim step per rendered frame: one frame of video is exactly one dt
+    // of simulation, so the capture is paced by the sim rather than by
+    // whatever the machine managed that instant
+    double fixed_dt = 0.0;
+    int pace_fps = 0;
+
+    // "1/240" reads better than 0.0041667 for a step you are choosing by hand
+    auto parse_dt = [](const char *s) {
+        if (const char *slash = std::strchr(s, '/')) {
+            const double den = std::atof(slash + 1);
+            return den != 0.0 ? std::atof(s) / den : 0.0;
+        }
+        return std::atof(s);
+    };
+    auto next = [&](int &i) { return i + 1 < argc ? argv[++i] : "0"; };
+
     for (int i = 1; i < argc; ++i) {
-        if (std::strcmp(argv[i], "--list") == 0) {
+        if (std::strcmp(argv[i], "--dt") == 0) {
+            fixed_dt = parse_dt(next(i));
+        } else if (std::strcmp(argv[i], "--fps") == 0) {
+            pace_fps = std::atoi(next(i));
+        } else if (std::strcmp(argv[i], "--list") == 0) {
             std::printf("Available demos:\n");
             for (auto &cat : registry.categories()) {
                 std::printf("\n  [%s]\n", cat.c_str());
@@ -39,7 +62,16 @@ int main(int argc, char *argv[]) {
             std::printf("Usage: manifold [demo_id] [options]\n");
             std::printf("  <demo_id>     Launch a specific demo directly\n");
             std::printf("  --list        List all available demos\n");
-            std::printf("  --help        Show this help\n");
+            std::printf("  --help        Show this help\n\n");
+            std::printf("Steady-pace capture (for screen recording):\n");
+            std::printf("  --dt <s>      Sim step per frame, e.g. 1/240 or "
+                        "0.004167\n");
+            std::printf("  --fps <n>     Frame rate to hold (default 1/dt, "
+                        "i.e. real time)\n");
+            std::printf("                Playback speed is dt*fps; speed up "
+                        "by the inverse in post.\n");
+            std::printf("                Frames that miss the budget are "
+                        "reported on stdout.\n");
             return 0;
         } else if (argv[i][0] != '-') {
             // positional arg = demo ID
@@ -61,7 +93,11 @@ int main(int argc, char *argv[]) {
     config.width = 1280;
     config.height = 720;
     config.title = "manifold";
-    config.target_fps = 240;
+    // an unpaced run is free to render as fast as it likes; a paced one is
+    // held at exactly the rate the capture expects
+    if (fixed_dt > 0.0 && pace_fps <= 0)
+        pace_fps = (int)std::lround(1.0 / fixed_dt);
+    config.target_fps = pace_fps > 0 ? pace_fps : 240;
     config.msaa = true;
     config.highdpi = true;
     config.smooth_lines = true;
@@ -74,6 +110,20 @@ int main(int argc, char *argv[]) {
 
     // sync theme to raygui
     manifold::App::sync_theme_to_raygui(manifold::Rendering::active_theme());
+
+    // ---- pacing ----
+    const double budget = pace_fps > 0 ? 1.0 / pace_fps : 0.0;
+    long frame_no = 0, late_frames = 0;
+    double worst_ms = 0.0;
+
+    if (fixed_dt > 0.0) {
+        const double speed = fixed_dt * pace_fps;
+        std::printf("[pace] dt %.4f ms x %d fps -> %.3gx real time "
+                    "(speed up %.3gx in post)\n",
+                    fixed_dt * 1000.0, pace_fps, speed, 1.0 / speed);
+        std::printf("[pace] frame budget %.2f ms; overruns reported below\n",
+                    budget * 1000.0);
+    }
 
     // ---- state ----
     AppState state = direct_launch ? AppState::Running : AppState::Browser;
@@ -185,9 +235,12 @@ int main(int argc, char *argv[]) {
                 }
             }
 
-            // fixed sim dt while recording, wall-clock dt otherwise
+            // --dt pins the step so one frame is always one dt of sim, which
+            // is what makes an external screen recording retimeable. otherwise
+            // fixed while recording, wall-clock while just looking at it
             const double sim_dt =
-                renderer.is_recording()
+                fixed_dt > 0.0 ? fixed_dt
+                : renderer.is_recording()
                     ? REC_SIM_DT
                     : std::min((double)renderer.delta_time(), 1.0 / 30.0);
 
@@ -207,10 +260,33 @@ int main(int argc, char *argv[]) {
             }
 
             layered.end_frame();
+
+            // end_frame has swapped, so GetFrameTime is the frame just gone,
+            // including the wait SetTargetFPS inserts. over budget means the
+            // work did not fit and the capture will stutter there.
+            // the first frames build shaders and warm caches, so skip them
+            if (budget > 0.0 && ++frame_no > 30) {
+                const double ms = GetFrameTime() * 1000.0;
+                if (ms > budget * 1000.0 * 1.05) {
+                    ++late_frames;
+                    worst_ms = std::max(worst_ms, ms);
+                    std::printf("[slow] frame %ld: %.2f ms > %.2f ms "
+                                "(%ld late so far)\n",
+                                frame_no, ms, budget * 1000.0, late_frames);
+                    std::fflush(stdout);
+                }
+            }
             break;
         }
         }
     }
+
+    if (budget > 0.0 && frame_no > 0)
+        std::printf("[pace] %ld frames, %ld late (%.2f%%), worst %.2f ms "
+                    "against a %.2f ms budget\n",
+                    frame_no, late_frames,
+                    100.0 * (double)late_frames / (double)frame_no, worst_ms,
+                    budget * 1000.0);
 
     active_demo.reset();
     renderer.shutdown();

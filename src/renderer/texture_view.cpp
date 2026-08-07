@@ -44,8 +44,13 @@ bool TextureView::load(const std::string &path, const TextureViewSettings &s) {
     m_w = img.width;
     m_h = img.height;
     m_tex = LoadTextureFromImage(img);
-    SetTextureFilter(m_tex, m_settings.bilinear ? TEXTURE_FILTER_BILINEAR
-                                                : TEXTURE_FILTER_POINT);
+    if (m_settings.mipmaps) {
+        GenTextureMipmaps(&m_tex);
+        SetTextureFilter(m_tex, TEXTURE_FILTER_TRILINEAR);
+    } else {
+        SetTextureFilter(m_tex, m_settings.bilinear ? TEXTURE_FILTER_BILINEAR
+                                                    : TEXTURE_FILTER_POINT);
+    }
 
     const ::Color *px = (const ::Color *)img.data;
     m_pixels.assign(px, px + (size_t)m_w * m_h);

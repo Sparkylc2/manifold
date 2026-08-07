@@ -23,8 +23,6 @@ class SystemState {
     void apply_force(const Vector2d &f, int body);
     void apply_torque(double torque, int body);
 
-    std::vector<int> index_map;
-
     VectorXd a_theta;
     VectorXd v_theta;
     VectorXd theta;

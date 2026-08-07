@@ -27,6 +27,14 @@ class DemoRegistry {
                              []() { return std::make_unique<T>(); }});
     }
 
+    // factory overload: lets the caller register a demo without its definition
+    // being visible, so demo headers stay out of the launcher TU
+    void add(std::unique_ptr<Demo::DemoBase> (*factory)(), const std::string &id,
+             const std::string &name, const std::string &category,
+             const std::string &description) {
+        m_entries.push_back({id, name, category, description, factory});
+    }
+
     const std::vector<DemoEntry> &entries() const { return m_entries; }
 
     std::vector<std::string> categories() const {

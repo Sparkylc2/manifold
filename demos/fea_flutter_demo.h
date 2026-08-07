@@ -11,6 +11,7 @@
 #include <manifold/renderer/constraint_visuals.h>
 #include <manifold/renderer/demo_base.h>
 #include <manifold/renderer/field_view.h>
+#include <manifold/renderer/interpolation.h>
 #include <manifold/renderer/plot_widget.h>
 
 #include "manifold/renderer/theme.h"
@@ -25,9 +26,13 @@ using Vector2d = Eigen::Vector2d;
 
 class FeaFlutterDemo : public DemoBase {
   public:
-    static constexpr int COLS = 160;
-    static constexpr int ROWS = 80;
-    static constexpr double CELL = 0.06;
+    // grid refinement. cell count goes up and cell size goes down together, so
+    // COLS*CELL and ROWS*CELL are invariant: the flow occupies the same 9.60 x
+    // 4.80 of world, and every slot number tuned against it still holds
+    static constexpr double RES_SCALE = 1.0;
+    static constexpr int COLS = (int)(160 * RES_SCALE);
+    static constexpr int ROWS = (int)(80 * RES_SCALE);
+    static constexpr double CELL = 0.06 / RES_SCALE;
     static constexpr int SS = 2;
 
     static constexpr double INFLOW = 3.0;
@@ -59,6 +64,9 @@ class FeaFlutterDemo : public DemoBase {
     static constexpr double RELAX_SPRINGS = 0.01;
     static constexpr double SPR_LOAD_SCALE = 30.0;
     static constexpr double SPR_ANCHOR_X = 0.35;
+
+    static constexpr double LABEL_PAD_Y = 0.55; // clears the edge fade
+    static constexpr int LABEL_SIZE = 15;
     static constexpr double VM_MAX_SPRINGS = 9000.0;
 
     enum class Drive { TwoWay, Wake, Springs };
@@ -185,6 +193,25 @@ class FeaFlutterDemo : public DemoBase {
             draw_supports(r);
 
         draw_beam(r);
+        draw_speed_label(r);
+        draw_stress_label(r);
+    }
+
+    void draw_speed_label(Rendering::Renderer *r) const {
+        const double top = m_fluid->origin().y() + ROWS * CELL;
+        Rendering::LayerScope txt(r, Rendering::Layer::Text);
+        int sx, sy;
+        r->world_to_screen(SPR_ANCHOR_X, top - LABEL_PAD_Y, &sx, &sy);
+        r->draw_text("Speed", sx, sy, LABEL_SIZE,
+                     Rendering::palette::text_dim());
+    }
+    void draw_stress_label(Rendering::Renderer *r) const {
+        const double bot = m_fluid->origin().y();
+        Rendering::LayerScope txt(r, Rendering::Layer::Text);
+        int sx, sy;
+        r->world_to_screen(SPR_ANCHOR_X, bot + LABEL_PAD_Y, &sx, &sy);
+        r->draw_text("Stress", sx, sy, LABEL_SIZE,
+                     Rendering::palette::text_dim());
     }
 
     void render_hud(Rendering::Renderer *r) {
@@ -366,17 +393,94 @@ class FeaFlutterDemo : public DemoBase {
         m_vm_primed = false;
     }
 
+    // ---- beam stress ramp ----
+    //
+    // Base -> one saturated hue, lerped in Oklab. Both ends have to stay clear
+    // of accent1-4, which already colour the fluid the beam sits in; that
+    // clash is what made the original ramp unreadable. Measured in Oklab,
+    // against the current text_dim base:
+    //
+    //            travel from base   nearest accent
+    //   wine       0.112              0.112 (accent1 terracotta)
+    //   moss       0.332              0.204 (accent4)      <- best on both
+    //   straw      0.165              0.049 (accent3 ochre)
+    //
+    // Stops, low -> high, lerped in Oklab between neighbours. Green for the
+    // working range, yellow as it loads, red held back for genuinely high
+    // stress. Edit both arrays together in stress_colour() to add or move a
+    // stop; a single-hue ramp is just two entries.
+    //
+    // The green has to clear accent2 (dusty sage), which the fluid ramp uses.
+    // Fern sits 0.093 from it -- about the same margin the wine red has from
+    // accent1, which already reads fine. A darker moss would be safer (0.208)
+    // but travels only 0.144 from this dark base, and that flat dark low end is
+    // exactly what was wrong before.
+    //
+    // Lightness runs 0.318 -> 0.579 -> 0.774 -> 0.460, so it brightens into the
+    // yellow then drops into the red: peak stress reads as more saturated
+    // rather than brighter, which is what makes the red stand out as a warning
+    // rather than just as "more".
+
+    // Sensitivity. t is vm/vm_max, which left most of the beam sitting in the
+    // dark end. The old smoothstep flattened BOTH ends, squashing the mid-range
+    // it needed to show (t=0.2 came out at 0.10). Now a short toe kills the
+    // tip flicker and a gamma below 1 lifts everything above it: t=0.2 lands at
+    // 0.38, roughly 3.6x more colour over the working range.
+    static constexpr double STRESS_TOE = 0.06;
+    static constexpr double STRESS_GAMMA = 0.40;
+    // Dead band. Stress below this fraction of vm_max stays at bare base, and
+    // the ramp is stretched over what is left. This is the knob for HOW MUCH of
+    // the beam carries colour; GAMMA is how fast it climbs once past the band.
+    // The two pull against each other -- GAMMA at 0.40 lifts hard, so without a
+    // band most of the beam sits in the yellow. Raise MIN to push yellow back
+    // toward the root, lower it to spread colour further out to the tip.
+    static constexpr double STRESS_MIN = 0.15;
+    // Where the last stop before red sits, so red starts blending in from here
+    // upward. Lower = red appears further down the beam. Was 0.45; at 0.36 a
+    // mid-load element carries roughly twice the red it did.
+    static constexpr double STRESS_RED_AT = 0.36;
+
+    // TO SWITCH BASE: same, exactly one stress_lo() live. Leaving both
+    // uncommented is a redefinition error, which is the point -- it cannot
+    // silently end up in a half-changed state.
+    static Rendering::Color stress_lo() {
+        return Rendering::palette::foreground();
+        // return Rendering::palette::text_dim();
+    }
+    // darker palette base. straw yellow needs this one; moss green does NOT
+    // (its travel collapses 0.332 -> 0.099 against a dark base)
+    // static Rendering::Color stress_lo() {
+    //     return Rendering::palette::foreground();
+    // }
+
     static Rendering::Color stress_colour(double t) {
         t = std::clamp(t, 0.0, 1.0);
-        const double s[3][3] = {
-            {226, 232, 241}, {168, 128, 236}, {236, 88, 216}};
-        const double x = t * 2.0;
-        const int i = std::min(1, (int)x);
-        const double f = x - i;
-        auto ch = [&](int k) {
-            return (unsigned char)(s[i][k] + f * (s[i + 1][k] - s[i][k]));
+        static const Rendering::Color col[] = {
+            stress_lo(), // dark base
+            stress_lo(), // dark base
+            // Rendering::Color::hex(0x4E8C3AFF),  // fern green
+            Rendering::Color::hex(0xD4B24AFF), // straw yellow
+            Rendering::Color::hex(0x8C3A3AFF), // wine red
         };
-        return Rendering::Color{ch(0), ch(1), ch(2), 255};
+
+        // todo: we will need to edit this later when doing the high res ones
+        // just to make sure the colouring looks nice
+        static constexpr double at[] = {0.00, 0.28, STRESS_RED_AT, 1.00};
+        constexpr int n = (int)(sizeof(at) / sizeof(at[0]));
+
+        for (int i = 0; i + 1 < n; i++)
+            if (t <= at[i + 1])
+                return Rendering::color_lerp_oklab(
+                    col[i], col[i + 1], (t - at[i]) / (at[i + 1] - at[i]));
+        return col[n - 1];
+    }
+
+    // toe: flat slope near zero so the unloaded tip does not flicker.
+    // gamma: lifts everything above it into the visible part of the ramp
+    static double stress_response(double t) {
+        t = std::clamp((t - STRESS_MIN) / (1.0 - STRESS_MIN), 0.0, 1.0);
+        const double toe = std::clamp(t / STRESS_TOE, 0.0, 1.0);
+        return std::pow(t, STRESS_GAMMA) * (toe * toe * (3.0 - 2.0 * toe));
     }
 
     void draw_supports(Rendering::Renderer *r) {
@@ -421,11 +525,7 @@ class FeaFlutterDemo : public DemoBase {
         const double vm_max =
             m_drive == Drive::Springs ? VM_MAX_SPRINGS : VM_MAX;
         auto colour = [&](double vm) {
-            double t = std::clamp(vm / vm_max, 0.0, 1.0);
-            // flat slope at both ends, so tiny fluctuations near
-            // zero stress barely move the colour (kills tip flicker)
-            t = t * t * (3.0 - 2.0 * t);
-            return stress_colour(t);
+            return stress_colour(stress_response(vm / vm_max));
         };
 
         // one gouraud triangle per element. adjacent elements share edge nodes

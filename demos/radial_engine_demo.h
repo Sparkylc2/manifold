@@ -1,5 +1,6 @@
 #pragma once
 
+#include <manifold/renderer/annotation_visuals.h>
 #include <manifold/renderer/body_visuals.h>
 #include <manifold/renderer/constraint_visuals.h>
 #include <manifold/renderer/demo_base.h>
