@@ -1,0 +1,3 @@
+/Users/lukascampbell/Documents/GitHub/manifold/bauild/CMakeFiles/CMakeScratch/TryCompile-eaKdN0/CMakeFiles/cmTC_1723e.dir
+/Users/lukascampbell/Documents/GitHub/manifold/bauild/CMakeFiles/CMakeScratch/TryCompile-eaKdN0/CMakeFiles/edit_cache.dir
+/Users/lukascampbell/Documents/GitHub/manifold/bauild/CMakeFiles/CMakeScratch/TryCompile-eaKdN0/CMakeFiles/rebuild_cache.dir

@@ -52,7 +52,10 @@ int main(int argc, char *argv[]) {
             for (auto &cat : registry.categories()) {
                 std::printf("\n  [%s]\n", cat.c_str());
                 for (auto *e : registry.by_category(cat)) {
-                    std::printf("    %-20s %s\n", e->id.c_str(),
+                    std::printf("    %-20s %s%s\n", e->id.c_str(),
+                                manifold::App::demo_built(*e)
+                                    ? ""
+                                    : "(not in this build) ",
                                 e->description.c_str());
                 }
             }
@@ -81,10 +84,21 @@ int main(int argc, char *argv[]) {
     }
 
     // validate direct launch ID
-    if (direct_launch && !registry.find(launch_id)) {
-        std::fprintf(stderr, "Unknown demo: '%s'\n", launch_id.c_str());
-        std::fprintf(stderr, "Run with --list to see available demos.\n");
-        return 1;
+    if (direct_launch) {
+        auto *entry = registry.find(launch_id);
+        if (!entry) {
+            std::fprintf(stderr, "Unknown demo: '%s'\n", launch_id.c_str());
+            std::fprintf(stderr, "Run with --list to see available demos.\n");
+            return 1;
+        }
+        if (!manifold::App::demo_built(*entry)) {
+            std::fprintf(stderr,
+                         "Demo '%s' was not compiled into this build.\n"
+                         "Reconfigure with -DMANIFOLD_DEMOS=all (or add it to "
+                         "the list) to enable it.\n",
+                         launch_id.c_str());
+            return 1;
+        }
     }
 
     // ---- init renderer ----
@@ -101,7 +115,7 @@ int main(int argc, char *argv[]) {
     config.msaa = true;
     config.highdpi = true;
     config.smooth_lines = true;
-    config.font_path = "assets/fonts/Inter-Medium.ttf";
+    config.font_path = "../assets/fonts/Inter-Medium.ttf";
 
     manifold::Rendering::set_theme(manifold::Rendering::Theme::earth());
 
@@ -182,9 +196,11 @@ int main(int argc, char *argv[]) {
                 auto *entry = registry.find(clicked);
                 if (entry) {
                     active_demo = entry->factory();
-                    active_demo->initialize();
-                    active_demo->setup_camera(&renderer);
-                    state = AppState::Running;
+                    if (active_demo) {
+                        active_demo->initialize();
+                        active_demo->setup_camera(&renderer);
+                        state = AppState::Running;
+                    }
                 }
             }
 

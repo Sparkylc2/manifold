@@ -1,5 +1,10 @@
 #pragma once
 
+// check if we can increase the texture size
+// without increasing the computation grid
+// and if that allows us to make nicer effects
+// regarding the rendering and how the fluid looks
+
 #include <manifold/coupling/fluid_wrench_force.h>
 #include <manifold/coupling/rigid_body_boundary.h>
 #include <manifold/fluid/solid_shapes.h>
@@ -13,7 +18,9 @@
 #include <manifold/solver/generic_body_system.h>
 #include <manifold/solver/rk4_ode_solver.h>
 
+#include "manifold/fluid/particle_tracers.h"
 #include "manifold/renderer/body_visuals.h"
+#include "manifold/renderer/renderer.h"
 #include "manifold/renderer/theme.h"
 #include "raylib.h"
 
@@ -32,7 +39,7 @@ class FlutterDemo : public DemoBase {
     static constexpr double CELL = 0.055;
     static constexpr int SS = 2;
 
-    static constexpr double INFLOW = 3.0;
+    static constexpr double INFLOW = 2.0;
     static constexpr double VISC = 0.0;
     static constexpr double RADIUS = 0.3;
 
@@ -52,9 +59,34 @@ class FlutterDemo : public DemoBase {
     static constexpr double PERT_REF = 0.60 * INFLOW;
     static constexpr int FADE_PX = 18; // border fade width px
 
+    // 0.04 lands at ~2 px on this zoom, thin enough that the shader's edge
+    // falloff eats most of it before it reaches the framebuffer.
+    // MAX_LEN is only a ceiling -- the blob's length comes from how far it
+    // actually travels, so it stretches in the jet and rounds up in the wake
+    static constexpr double TRACER_W = 0.085;
+    static constexpr double TRACER_MAX_LEN = 0.35;
+    static constexpr int TRACERS = 500;
+
     const char *name() const override { return "Cylinder Flutter"; }
 
     void initialize() override {
+
+        // seed and cull against the actual grid. the +-5 default straddles a
+        // channel that runs x +-9.07, y +-3.44, so a third of the tracers land
+        // outside the fluid where velocity_at clamps and never convect
+        {
+            const Vector2d o = m_fluid.origin();
+            const Vector2d span(COLS * CELL, ROWS * CELL);
+
+            double b = 1;
+            m_tracer_system.position_min = o + Vector2d(b, 0.0);
+            m_tracer_system.position_max = o + span;
+            m_tracer_system.min_bound = o - Vector2d(b, 0.0);
+            m_tracer_system.max_bound = o + span;
+        }
+        // reads position_min/max to build its distributions, so it goes last
+        m_tracer_system.init(&m_fluid, TRACERS, 0);
+
         m_fluid.clear();
         m_fluid.set_channel(INFLOW);
 
@@ -109,6 +141,7 @@ class FlutterDemo : public DemoBase {
 
     void process(double dt) override {
         m_fluid.advance(dt);
+        m_tracer_system.update(dt);
         // two-way load: net force + torque (torque now emerges from the
         // per-cell no-slip penalization, not a separate rim model)
         const Vector2d F = m_fluid.obstacle_force() * FORCE_SCALE;
@@ -118,6 +151,9 @@ class FlutterDemo : public DemoBase {
     }
 
     void render(Rendering::Renderer *r) override {
+        if (!m_tracer_shader)
+            m_tracer_shader = r->load_shader("../assets/shaders/tracer.fs");
+
         draw_grid(r);
 
         const Vector2d o = m_fluid.origin();
@@ -129,7 +165,8 @@ class FlutterDemo : public DemoBase {
             r, o.x(), o.y(), CELL,
             [this, vmax](double wx, double wy, double &val, double &a) {
                 Vector2d vel;
-                m_fluid.velocity_at(Vector2d(wx, wy), &vel, Fluid::Interp::Cubic);
+                m_fluid.velocity_at(Vector2d(wx, wy), &vel,
+                                    Fluid::Interp::Cubic);
                 val = vel.norm() / vmax;
                 const double pert = std::hypot(vel.x() - INFLOW, vel.y());
                 const double pa = std::clamp(
@@ -139,6 +176,24 @@ class FlutterDemo : public DemoBase {
                     0.0, 1.0);
                 a = std::max(pa, dye);
             });
+
+        // for (int i = 0; i < m_tracer_system.N; i++) {
+        //     Vector2d pos = m_tracer_system.trail_at(i, 0);
+        //     std::cout << pos.x() << "  " << pos.y() << std::endl;
+        //     Rendering::draw_body_disk(r, pos, 0.01, 0.0, {});
+        // }
+
+        // additive is a glow: it can only push toward white, so on a light
+        // theme the trail composites to background and vanishes. this one was
+        // drawing terracotta onto sand and clamping to (255,255,255)
+        const bool dark = Rendering::palette::background().r < 128;
+
+        std::vector<Rendering::Vertex2D> mesh;
+        m_tracer_system.build_mesh(mesh, TRACER_W, TRACER_MAX_LEN,
+                                   Rendering::palette::background());
+        r->draw_shaded(
+            mesh.empty() ? 0 : m_tracer_shader, mesh.data(), (int)mesh.size(),
+            dark ? Rendering::Blend::Additive : Rendering::Blend::Alpha);
 
         Rendering::draw_spring_damper(r, m_anchor_x.p, m_cyl.p);
         Rendering::draw_spring_damper(r, m_anchor_y.p, m_cyl.p);
@@ -246,6 +301,9 @@ class FlutterDemo : public DemoBase {
     bool m_dragging = false;
 
     Rendering::FieldView m_field;
+
+    unsigned int m_tracer_shader = 0;
+    Fluid::TracerSystem m_tracer_system;
 };
 
 } // namespace manifold::Demo

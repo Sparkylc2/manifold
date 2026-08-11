@@ -1,5 +1,6 @@
 #pragma once
 
+#include <iostream>
 #include <manifold/coupling/fluid_wrench_force.h>
 #include <manifold/coupling/rigid_body_boundary.h>
 #include <manifold/fluid/mac_fluid_solver.h>
@@ -16,6 +17,8 @@
 #include <manifold/solver/generic_body_system.h>
 #include <manifold/solver/rk4_ode_solver.h>
 
+#include "manifold/fluid/particle_tracers.h"
+#include "manifold/renderer/renderer.h"
 #include "manifold/renderer/theme.h"
 #include "raylib.h"
 
@@ -37,14 +40,39 @@ class AerofoilFlutterDemo : public DemoBase {
     // shaped on screen, RES is only resolution. Matching SPAN_L/SPAN_W is what
     // makes this a drop-in for the cylinder in the reel -- the slot geometry,
     // HEAD, and the aspect shared with the nozzle all fall out of it.
-    static constexpr double SPAN_L = 10.65; // along the flow, world units
-    static constexpr double SPAN_W = 5.95;  // across it
-    static constexpr double RES = 20.0;     // cells per world unit
+    static constexpr double SPAN_L = 6.65; // along the flow, world units
+    static constexpr double SPAN_W = 3.95; // across it
+
+    // measured, 0012, cut-cell MAC at CFL 2, free slip, against thin-aerofoil
+    // Cl = 2*pi*sin(a):
+    //
+    //   RES   chord   Cl@4   Cl@8   Cl@12   ms/frame
+    //    20     42    0.34   0.47    0.54       18
+    //    28     59    0.38   0.43    0.66       51
+    //    36     76    0.35   0.47    0.65       99
+    //    44     92    0.37   0.49    0.68      168
+    //   theory        0.44   0.87    1.31
+    //
+    // Cl@4 is flat across the whole range, so circulation is established at 20
+    // and refining does not buy more of it -- 42 cells of chord is enough for
+    // the trailing edge to set it. What is still short is the slope at angle,
+    // which is the channel being 2.8 chords tall and the load being pressure
+    // only.
+    //
+    // (an earlier version of this table showed Cl@4 near zero until RES 36.
+    // that was the penalization no-slip smearing a one-cell boundary layer over
+    // a foil 5 cells thick, not the grid. see set_no_slip.)
+    static constexpr double RES = 20.0; // cells per world unit
 
     static constexpr double CELL = 1.0 / RES;
     static constexpr int COLS = (int)(SPAN_L * RES);
     static constexpr int ROWS = (int)(SPAN_W * RES);
     static constexpr int SS = 2;
+
+    // MacCormack wants the backtrace inside a cell or two, and the wake three
+    // chords back carries about twice the energy at CFL 2 than unsplit
+    static constexpr double FLUID_CFL = 2.0;
+    static constexpr int MAX_FLUID_SUBSTEPS = 4;
 
     static constexpr double W = COLS * CELL; // solver-space extents
     static constexpr double H = ROWS * CELL;
@@ -57,19 +85,20 @@ class AerofoilFlutterDemo : public DemoBase {
     static constexpr double HEAD = 0.0;
     static constexpr double EDGE_FADE = 0.055;
 
-    // slower than the 12.0 the standalone demo ran at: the reel cell wants a
+    // slower than the 12.0 the standalone demo ran 60: the reel cell wants a
     // flutter you can follow, and the shed frequency scales with it
-    static constexpr double INFLOW = 10.0;
-    // 2.1 is the largest chord measured stable. The coupling force is well
-    // behaved up to here (|F|max ~12 against ~9 at 1.5) and then falls off a
-    // cliff between 2.1 and 2.5, where |F|max jumps to ~5900 -- 630x, which is
-    // nothing like the ~1.7x the load scaling predicts. Cause not yet found,
-    // so treat 2.5 as out of bounds until it is.
+    static constexpr double INFLOW = 6.0;
+    // The 2.1 -> 2.5 cliff recorded here, where |F|max jumped 630x against a
+    // predicted 1.7x, was the added-mass instability: added mass goes as chord
+    // squared while the foil's own mass was fixed, so the ratio crossed what a
+    // staggered loop can carry and the load ran away rather than scaling. It is
+    // carried on the inertia now (see build_foil), so chord is no longer capped
+    // by it -- what caps it now is the channel, at roughly SPAN_W / 2.
     static constexpr double CHORD = 2.1;       // base chord (world units)
     static constexpr double SCALE = 1.0;       // foil size multiplier
     static constexpr double C = CHORD * SCALE; // effective chord, used below
     static constexpr double THICK = 0.12;      // thickness as a fraction of C
-    static constexpr int PANELS = 64; // crude SDF panels for penalization
+    static constexpr int PANELS = 160; // sdf panels; rasterized once, so free
     static constexpr int RENDER_PANELS = 64; // smooth outline
     // [N] cycles these NACA 4-digit profiles (12 == symmetric 0012)
     static constexpr int CODES[6] = {2412, 4412, 2415, 6409, 12, 15};
@@ -91,9 +120,10 @@ class AerofoilFlutterDemo : public DemoBase {
     // in plunge and ~2.8x further in pitch -- enough to swing the foil out of
     // the channel, where the boundary meets the wall BC and the whole thing
     // tumbles. Tying K to CHORD holds the deflection instead of the stiffness.
-    static constexpr double C_REF = 1.5; // chord these were tuned at
-    static constexpr double SPRING_K = 20.0 * (CHORD / C_REF);
-    static constexpr double TORSION_K = 3 * (CHORD / C_REF) * (CHORD / C_REF);
+    static constexpr double C_REF = 2.1; // chord these were tuned at
+    static constexpr double SPRING_K = 300.0 / 2 * (CHORD / C_REF);
+    static constexpr double TORSION_K =
+        150.0 * 3 / 4 * (CHORD / C_REF) * (CHORD / C_REF);
 
     // NEGATIVE, and that matters: at +8 deg the aerodynamic moment reinforces
     // the pitch instead of opposing it, so the foil winds up to ~21 deg and
@@ -112,6 +142,17 @@ class AerofoilFlutterDemo : public DemoBase {
     // the suction side at the top of the ramp
     static constexpr double VMAX = 2.7 * INFLOW;
 
+    // MAX_LEN is only a ceiling -- the blob's length comes from how far it
+    // actually travels, so it stretches over the suction side and rounds up
+    // where the wake stalls. this cell runs 5x the flutter demo's inflow, so
+    // the ceiling is correspondingly wider
+    static constexpr double TRACER_W = 0.02;
+    static constexpr double TRACER_MAX_LEN = 0.30;
+    // this cell runs 5x the flutter demo's inflow, so the trail has to span
+    // proportionally less time to stay a blob rather than a streak
+    static constexpr int TRACER_SUBSTEPS = 6;
+    static constexpr int TRACERS = 1000;
+
     static constexpr int BRUSH = 2;          // dye splat radius (cells)
     static constexpr double DENS_RATE = 240; // dye per second under the cursor
 
@@ -119,6 +160,8 @@ class AerofoilFlutterDemo : public DemoBase {
     static constexpr double PERT_MIN = 0.05 * INFLOW;
     static constexpr double PERT_REF = 0.60 * INFLOW;
     static constexpr int FADE_PX = 16;
+
+    static constexpr double ALPHA_PADDING_DIST = 1.5; // solver units
 
     const char *name() const override { return "Aerofoil Flutter"; }
 
@@ -128,17 +171,38 @@ class AerofoilFlutterDemo : public DemoBase {
     // keeps the texture axis-aligned for draw_texture's quad
     void set_quarter_turn(bool on) { m_turned = on; }
 
+    Rendering::Colormap speed_ramp() {
+        return [](double t) -> Rendering::Color {
+            const auto c0 = Rendering::palette::background();
+            const auto c1 = Rendering::palette::accent4();
+            const auto c2 = Rendering::palette::accent2();
+            const auto c3 = Rendering::palette::accent3();
+            const auto c4 = Rendering::palette::accent1();
+            if (t < 0.2)
+                return color_lerp(c0, c1, t / 0.2);
+            if (t < 0.5)
+                return color_lerp(c1, c2, (t - 0.2) / 0.3);
+            if (t < 0.8)
+                return color_lerp(c2, c3, (t - 0.5) / 0.3);
+            return color_lerp(c3, c4, (t - 0.8) / 0.2);
+        };
+    }
+
     void initialize() override {
-        // configure both solvers so [M] can hot-swap between them live
+        const Vector2d o = m_fluid->origin();
+
+        // configure both solvers so [M] can
+        // hot-swap between them live
         m_stam.clear();
         m_stam.set_channel(INFLOW);
         m_mac.clear();
         m_mac.set_channel(INFLOW);
         m_mac.set_smoke(true); // MAC needs its dye/advection path on
+        m_mac.set_cfl(FLUID_CFL, MAX_FLUID_SUBSTEPS);
         m_fluid = m_use_mac ? (Fluid::FluidSolver *)&m_mac
                             : (Fluid::FluidSolver *)&m_stam;
+        setup_tracers();
 
-        const Vector2d o = m_fluid->origin();
         m_rest = o + Vector2d(0.32 * COLS * CELL, 0.5 * ROWS * CELL);
 
         m_foil.reset();
@@ -214,19 +278,21 @@ class AerofoilFlutterDemo : public DemoBase {
         // departs from the inflow rather than by where the tracer happened to
         // be seeded. the density term in the sampler goes inert with them
         m_fluid->advance(dt);
+        m_tracer_system.update(dt, TRACER_SUBSTEPS);
 
         Vector2d F;
         double tau;
         m_fluid->wrench_on(m_boundary, m_foil.p, &F, &tau);
         m_last_F = F;
-        m_last_tau = tau; // pitching moment about the COM (drives rotation)
-        m_fluid_force.set_wrench(F * 1.2, tau * 1.5);
+
+        m_last_tau = tau;
+        m_fluid_force.set_wrench(F, tau);
         m_system.process(dt, SUBSTEPS);
     }
 
     void render(Rendering::Renderer *r) override {
-        if (!m_turned)
-            draw_grid(r);
+        // if (!m_turned)
+        //     draw_grid(r);
         render_cell(r);
 
         if (m_mouse.active())
@@ -252,21 +318,84 @@ class AerofoilFlutterDemo : public DemoBase {
                        Rendering::palette::text_dim());
     }
 
+    double get_alpha(const Vector2d &pos, const double a) {
+        const Vector2d o = m_fluid->origin();
+        const Vector2d max = {o.x() + W, o.y() + H};
+
+        // distance to the nearest edge on each axis
+        const double dx = std::min(pos.x() - o.x(), max.x() - pos.x());
+        const double dy = std::min(pos.y() - o.y(), max.y() - pos.y());
+
+        // 0 at the edge, ramps to 1 once we're a full pad deep
+        const double fx = std::clamp(dx / ALPHA_PADDING_DIST, 0.0, 1.0);
+        const double fy = std::clamp(dy / ALPHA_PADDING_DIST, 0.0, 1.0);
+
+        double pow = 1.5;
+        double t1 = fx;
+        double t2 = fy;
+        return std::clamp(std::pow(t1, pow) * std::pow(t2, pow) * a, 0.0, 1.0);
+
+        // double t = a * fx * fy;
+        // return std::clamp(std::pow(t, 1.2), 0.0, 1.0);
+    }
+
     void render_cell(Rendering::Renderer *r) override {
+        if (!m_trail_shader)
+            m_trail_shader = r->load_shader("assets/shaders/tracer.fs");
+
         const Vector2d fo =
             m_turned ? Vector2d(-0.5 * H, -W) : m_fluid->origin();
 
-        m_field.render(
-            r, fo.x(), fo.y(), CELL,
-            [this](double wx, double wy, double &val, double &a) {
-                const Vector2d p = to_solver(wx, wy);
-                Vector2d vel;
-                m_fluid->velocity_at(p, &vel, Fluid::Interp::Cubic);
-                val = vel.norm() / VMAX;
-                const double pert = std::hypot(vel.x() - INFLOW, vel.y());
-                a = std::clamp((pert - PERT_MIN) / (PERT_REF - PERT_MIN), 0.0,
-                               1.0);
-            });
+        m_field.render(r, fo.x(), fo.y(), CELL,
+                       [this](double wx, double wy, double &val, double &a) {
+                           const Vector2d p = to_solver(wx, wy);
+                           Vector2d vel;
+
+                           m_fluid->velocity_at(p, &vel, Fluid::Interp::Cubic);
+                           val = vel.norm() / VMAX;
+                           const double pert =
+                               std::hypot(vel.x() - INFLOW, vel.y());
+
+                           double t = (pert - PERT_MIN) / (PERT_REF - PERT_MIN);
+                           a = std::clamp(std::pow(t + 0.2, 0.4), 0.0, 1.0);
+                           a = get_alpha(p, a);
+                       });
+
+        // m_field.render(r, fo.x(), fo.y(), CELL,
+        //                [this](double wx, double wy, double &val, double &a) {
+        //                    const Vector2d p = to_solver(wx, wy);
+        //                    Vector2d vel;
+        //                    m_fluid->velocity_at(p, &vel,
+        //                    Fluid::Interp::Cubic); val = vel.norm() / VMAX;
+        //                    const double pert =
+        //                        std::hypot(vel.x() - INFLOW, vel.y());
+        //
+        //                    double t = (pert - PERT_MIN) / (PERT_REF -
+        //                    PERT_MIN); a = std::clamp(t, 0.0, 1.0);
+        //                });
+        //
+        // additive is a glow: it can only push toward white, so on a light
+        // theme the trail composites to background and disappears
+        const bool dark = Rendering::palette::background().r < 128;
+
+        std::vector<Rendering::Vertex2D> mesh;
+        m_tracer_system.build_mesh(mesh, TRACER_W, TRACER_MAX_LEN,
+                                   Rendering::palette::background());
+
+        // m_tracer_system.build_mesh(mesh, TRACER_W, TRACER_MAX_LEN,
+        //                            Rendering::palette::foreground());
+        //
+        // the tracers integrate in solver space; everything else in this cell
+        // is drawn through to_draw, and under a quarter turn the two differ
+        for (auto &vert : mesh) {
+            const Vector2d d = to_draw(Vector2d(vert.x, vert.y));
+            vert.x = d.x();
+            vert.y = d.y();
+        }
+
+        r->draw_shaded(
+            mesh.empty() ? 0 : m_trail_shader, mesh.data(), (int)mesh.size(),
+            dark ? Rendering::Blend::Additive : Rendering::Blend::Alpha);
 
         const Vector2d c = to_draw(m_foil.p);
         const Vector2d ax = to_draw(m_anchor_x.p);
@@ -318,6 +447,7 @@ class AerofoilFlutterDemo : public DemoBase {
                                 : (Fluid::FluidSolver *)&m_stam;
             m_fluid->clear();
             m_fluid->set_channel(INFLOW);
+            setup_tracers(); // it caches the solver it samples
         }
 
         int mx, my;
@@ -350,6 +480,21 @@ class AerofoilFlutterDemo : public DemoBase {
     }
 
   private:
+    // holds the solver pointer, so it has to be redone whenever [M] swaps which
+    // one is live. seeded and culled against the actual grid: the +-5 default
+    // straddles this channel and would strand a chunk of them outside the
+    // fluid, where velocity_at clamps and they never convect
+    void setup_tracers() {
+        const Vector2d o = m_fluid->origin();
+
+        m_tracer_system.position_min = o;
+        m_tracer_system.position_max = o + Vector2d(COLS * CELL, ROWS * CELL);
+        m_tracer_system.min_bound = m_tracer_system.position_min;
+        m_tracer_system.max_bound = m_tracer_system.position_max;
+
+        m_tracer_system.init(m_fluid, TRACERS, 0);
+    }
+
     void build_foil() {
         std::vector<Vector2d> mask = Fluid::naca_points(m_code, CHORD, PANELS);
         std::vector<Vector2d> draw =
@@ -361,9 +506,18 @@ class AerofoilFlutterDemo : public DemoBase {
         for (auto &p : draw)
             p -= com;
 
-        m_boundary.set_local_sdf(Fluid::polygon_sdf(mask));
+        // rasterized once here, so PANELS is now free to be as fine as the
+        // outline: the per-step cost is a bilerp either way
+        m_boundary.set_local_sdf(Fluid::cached_sdf(Fluid::polygon_sdf(mask),
+                                                   0.75 * CHORD, 0.5 * CELL));
         m_outline = draw;
-        m_foil.I = Fluid::polygon_inertia(draw, MASS);
+
+        // the foil is lighter than the fluid it displaces, so the added mass
+        // is not a small correction here -- it is 7x the body mass, and
+        // without it on the inertia the staggered loop diverges in 25 frames
+        m_foil.m = MASS + Coupling::added_mass(CHORD);
+        m_foil.I =
+            Fluid::polygon_inertia(draw, MASS) + Coupling::added_inertia(CHORD);
     }
 
     // grab if the cursor is within ~one chord of the foil COM
@@ -416,8 +570,8 @@ class AerofoilFlutterDemo : public DemoBase {
         (size_t)ROWS, (size_t)COLS,
         CELL,         /*visc*/ 0.0,
         /*diff*/ 0.0, Vector2d(-COLS * CELL * 0.5, -ROWS * CELL * 0.5)};
-    Fluid::FluidSolver *m_fluid = &m_stam;
-    bool m_use_mac = false;
+    Fluid::FluidSolver *m_fluid = &m_mac;
+    bool m_use_mac = true; // cut-cell MAC; [M] still drops back to Stam
 
     Solver::GenericRigidBodySystem m_system;
     Solver::GaussianEliminationSLESolver m_sle;
@@ -443,6 +597,10 @@ class AerofoilFlutterDemo : public DemoBase {
 
     std::vector<Vector2d> m_outline;
     Rendering::FieldView m_field;
+
+    Fluid::TracerSystem m_tracer_system;
+
+    unsigned int m_trail_shader = 0;
 };
 
 } // namespace manifold::Demo

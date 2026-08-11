@@ -135,7 +135,8 @@ class Browser {
                             const Rendering::Theme &theme,
                             Rendering::Renderer *r) {
         Rectangle rect = {(float)x, (float)y, (float)w, (float)h};
-        bool hovered = CheckCollisionPointRec(GetMousePosition(), rect);
+        const bool built = demo_built(*entry);
+        bool hovered = built && CheckCollisionPointRec(GetMousePosition(), rect);
         bool clicked = hovered && IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
 
         // card background
@@ -156,7 +157,8 @@ class Browser {
                      theme.background);
 
         // name
-        r->draw_text(entry->name.c_str(), x + 12, y + 14, 20, theme.foreground);
+        r->draw_text(entry->name.c_str(), x + 12, y + 14, 20,
+                     built ? theme.foreground : theme.text_dim);
 
         // description — wrapped to the card, ellipsised past two lines
         auto lines = wrap_text(r, entry->description, 14, w - 24, 2);
@@ -168,6 +170,9 @@ class Browser {
         if (hovered) {
             r->draw_text("Click to launch", x + 12, y + h - 24, 12,
                          theme.accent3);
+        } else if (!built) {
+            r->draw_text("not compiled in this build", x + 12, y + h - 24, 12,
+                         theme.text_dim);
         }
 
         return clicked ? entry->id : "";

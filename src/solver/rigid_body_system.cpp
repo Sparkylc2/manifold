@@ -66,7 +66,6 @@ int RigidBodySystem::get_full_constraint_count() const {
 void RigidBodySystem::populate_state() {
     const int num_b = get_body_count();
     const int num_c_eq = get_full_constraint_count();
-    const int num_c = get_constraint_count();
 
     m_state.resize(num_b, num_c_eq);
 
@@ -81,11 +80,6 @@ void RigidBodySystem::populate_state() {
         m_state.theta[i] = m_bodies[i]->theta;
 
         m_state.m[i] = m_bodies[i]->m;
-    }
-
-    for (int i = 0, curr_c_row = 0; i < num_c; i++) {
-        m_state.index_map[i] = curr_c_row;
-        curr_c_row += m_constraints[i]->constraint_count();
     }
 }
 

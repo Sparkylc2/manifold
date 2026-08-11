@@ -5,6 +5,12 @@
 
 namespace manifold::Demo {
 
+using DemoFactory = std::unique_ptr<DemoBase> (*)();
+
+// defined in the generated disabled_demos.cpp: true for factories compiled out
+// by -DMANIFOLD_DEMOS, whose stub returns nullptr
+bool demo_stubbed(DemoFactory factory);
+
 // one factory per demo; each is defined in its own TU so a demo header is
 // parsed by exactly one translation unit
 std::unique_ptr<DemoBase> make_pendulum_demo();

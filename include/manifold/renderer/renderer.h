@@ -25,6 +25,14 @@ constexpr int Middle = 2;
 
 enum class Layer { Grid, Field, Shadow, Content, Text, UI, Count, Auto };
 
+struct Vertex2D {
+    double x, y; // world coords
+    float u, v;  // fragTexCoord
+    Color color; // fragColor
+};
+
+enum class Blend { Alpha, Additive };
+
 struct RendererConfig {
     int width = 1280;
     int height = 720;
@@ -109,8 +117,17 @@ class Renderer {
         (void)dst_w, (void)dst_h, (void)flip_v, (void)tint;
     }
 
+    virtual void draw_shaded(unsigned int shader, const Vertex2D *verts,
+                             int count, Blend blend = Blend::Alpha) {
+        (void)shader, (void)verts, (void)count, (void)blend;
+    }
+
     // rendered width of text in the active font, in pixels
     virtual int measure_text(const std::string &text, int font_size) = 0;
+    virtual unsigned int load_shader(const std::string &fs_path) {
+        (void)fs_path;
+        return 0;
+    }
 
     // camera
     virtual void set_camera(double x, double y, double zoom) = 0;

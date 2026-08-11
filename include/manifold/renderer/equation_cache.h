@@ -33,7 +33,7 @@ class EquationCache {
   private:
     const Texture2D *get(const std::string &name);
 
-    std::string m_dir = "../assets/equations/";
+    std::string m_dir = "assets/equations/";
     std::unordered_map<std::string, Texture2D> m_cache;
 };
 

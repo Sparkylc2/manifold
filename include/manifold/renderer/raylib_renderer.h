@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <raylib.h>
 #include <string>
+#include <unordered_map>
 
 namespace manifold::Rendering {
 
@@ -81,8 +82,11 @@ class RaylibRenderer : public Renderer {
     void draw_texture(unsigned int tex_id, int tex_w, int tex_h, int dst_x,
                       int dst_y, int dst_w, int dst_h, bool flip_v,
                       Color tint = Color::hex(0xFFFFFFFFu)) override;
+    void draw_shaded(unsigned int shader, const Vertex2D *v, int count,
+                     Blend blend) override;
 
     int measure_text(const std::string &text, int font_size) override;
+    unsigned int load_shader(const std::string &fs) override;
 
     // --- camera ---
 
@@ -168,6 +172,9 @@ class RaylibRenderer : public Renderer {
     bool m_use_smooth_lines = false;
     Shader m_smooth_line_shader = {};
     bool m_smooth_line_shader_loaded = false;
+
+    // shaders
+    std::unordered_map<unsigned int, Shader> m_shaders;
 
     // recording
     bool m_recording = false;

@@ -71,6 +71,17 @@ inline double bicubic(const Field2D &f, double cx, double cy, bool monotone) {
              row(cl(j0 + 2, H - 1)), t);
 }
 
+// fraction of a segment with endpoint sdf values pa, pb that lies in fluid.
+// this is what lets a surface be seen between grid points: a face half covered
+// by a body reports 0.5 instead of snapping to all-fluid or all-solid
+inline double fluid_fraction(double pa, double pb) {
+    if (pa >= 0.0 && pb >= 0.0)
+        return 1.0;
+    if (pa < 0.0 && pb < 0.0)
+        return 0.0;
+    return (pa >= 0.0) ? pa / (pa - pb) : pb / (pb - pa);
+}
+
 // sample with the Interp enum
 // Linear -> bilinear, Cubic -> bicubic
 // defaults to the monotone kernel (monotone=false uses plain catmull-rom)

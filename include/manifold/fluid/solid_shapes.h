@@ -1,5 +1,6 @@
 #pragma once
 
+#include <manifold/fluid/field_sample.h>
 #include <manifold/fluid/solid_boundary.h>
 
 #include <algorithm>
@@ -170,6 +171,47 @@ inline double polygon_inertia(const std::vector<Vector2d> &v, double mass) {
 
 inline LocalSdf naca_sdf(int code = 12, double chord = 1.0, int panels = 12) {
     return polygon_sdf(naca_points(code, chord, panels));
+}
+
+// a rigid local shape rasterized once, so per-query cost drops to a bilerp.
+// polygon_sdf is O(panels) with a sqrt each and the solver evaluates the sdf at
+// every grid node and face every step, which for a detailed foil dominates the
+// frame. only valid for shapes whose local geometry never changes
+class CachedSdf {
+  public:
+    CachedSdf(const LocalSdf &f, double half_extent, double cell)
+        : m_h(cell), m_lo(-half_extent - 2.0 * cell) {
+        const size_t n = (size_t)std::ceil(-2.0 * m_lo / m_h) + 1;
+        m_grid.resize(n, n);
+
+        for (size_t j = 0; j < n; j++)
+            for (size_t i = 0; i < n; i++)
+                m_grid(i, j) = f(Vector2d(m_lo + i * m_h, m_lo + j * m_h));
+    }
+
+    double operator()(const Vector2d &p) const {
+        const double gx = (p.x() - m_lo) / m_h;
+        const double gy = (p.y() - m_lo) / m_h;
+
+        // outside the cached box the distance to the box under-estimates the
+        // distance to the shape, and is only ever read far from the surface
+        // where all the solver wants to know is "fluid"
+        if (gx < 0.0 || gy < 0.0 || gx > (double)m_grid.m_W - 1.0 ||
+            gy > (double)m_grid.m_H - 1.0) {
+            const Vector2d d = p.cwiseAbs() + Vector2d(m_lo, m_lo);
+            return d.cwiseMax(0.0).norm();
+        }
+        return bilerp(m_grid, gx, gy);
+    }
+
+  private:
+    Field2D m_grid;
+    double m_h;
+    double m_lo;
+};
+
+inline LocalSdf cached_sdf(const LocalSdf &f, double half_extent, double cell) {
+    return CachedSdf(f, half_extent, cell);
 }
 
 // fixed solid. velocity is zero, so the

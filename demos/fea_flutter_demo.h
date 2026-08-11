@@ -82,6 +82,9 @@ class FeaFlutterDemo : public DemoBase {
         m_stam.set_solid_project(m_solid_bc);
         m_mac.clear();
         m_mac.set_channel(INFLOW);
+        // U/h already puts this near CFL 1, so at 2 the split only engages
+        // where the flow locally accelerates rather than every frame
+        m_mac.set_cfl(2.0, 2);
 
         m_mac.set_smoke(true);
         m_fluid = active_fluid();
@@ -546,7 +549,7 @@ class FeaFlutterDemo : public DemoBase {
     Fluid::MACFluidSolver m_mac{ROWS,   COLS, CELL,
                                 1.0e-6, 0.0,  Vector2d::Zero()};
     Fluid::FluidSolver *m_fluid = nullptr;
-    bool m_use_mac = false;
+    bool m_use_mac = true; // cut-cell MAC; [M] still drops back to Stam
     bool m_solid_bc = true;
 
     std::unique_ptr<FEA::ElasticBody> m_body;

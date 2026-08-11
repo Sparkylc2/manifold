@@ -2,6 +2,7 @@
 
 #include <manifold/renderer/renderer.h>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace manifold::Rendering {
@@ -82,6 +83,8 @@ class LayeredRenderer : public Renderer {
     void draw_texture(unsigned int tex_id, int tex_w, int tex_h, int dst_x,
                       int dst_y, int dst_w, int dst_h, bool flip_v,
                       Color tint = Color::hex(0xFFFFFFFFu)) override;
+    void draw_shaded(unsigned int shader, const Vertex2D *v, int count,
+                     Blend blend) override;
 
     // --- pass-through ---
 
@@ -103,6 +106,8 @@ class LayeredRenderer : public Renderer {
     bool is_mouse_button_pressed(int b) override;
     float get_mouse_wheel_move() override;
     void get_mouse_delta(float *dx, float *dy) override;
+
+    unsigned int load_shader(const std::string &fs) override;
 
     int measure_text(const std::string &text, int font_size) override;
 
@@ -129,7 +134,8 @@ class LayeredRenderer : public Renderer {
         ScreenLine,
         SmoothScreenLine,
         ScreenRect,
-        TexQuad
+        TexQuad,
+        Shaded
     };
 
     struct Cmd {
@@ -140,6 +146,9 @@ class LayeredRenderer : public Renderer {
         int i0 = 0, i1 = 0, i2 = 0, i3 = 0;      // screen ints
         float fthick = 0;
         std::string text = {};
+        std::vector<Vertex2D> verts;
+        unsigned int shader = 0;
+        Blend blend = Blend::Alpha;
     };
 
     bool pinned() const;

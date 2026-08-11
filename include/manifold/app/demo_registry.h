@@ -8,6 +8,11 @@
 
 #include <manifold/renderer/demo_base.h>
 
+namespace manifold::Demo {
+// provided by the generated disabled_demos.cpp in manifold_demos
+bool demo_stubbed(std::unique_ptr<DemoBase> (*factory)());
+} // namespace manifold::Demo
+
 namespace manifold::App {
 
 struct DemoEntry {
@@ -77,5 +82,14 @@ class DemoRegistry {
   private:
     std::vector<DemoEntry> m_entries;
 };
+
+// false when -DMANIFOLD_DEMOS left this demo out of the build. checks the
+// stored function pointer rather than calling it, so nothing is constructed;
+// type-registered demos carry no plain pointer and are always built
+inline bool demo_built(const DemoEntry &entry) {
+    using Factory = std::unique_ptr<Demo::DemoBase> (*)();
+    auto *fn = entry.factory.target<Factory>();
+    return !fn || !Demo::demo_stubbed(*fn);
+}
 
 } // namespace manifold::App

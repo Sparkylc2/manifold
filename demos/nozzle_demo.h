@@ -243,7 +243,7 @@ class NozzleDemo : public DemoBase {
                                                .layer =
                                                    Rendering::Layer::Content};
         for (const char *p :
-             {"../assets/images/nozzle.png", "assets/images/nozzle.png"})
+             {"assets/images/nozzle.png", "assets/images/nozzle.png"})
             if (m_art.load(p, s))
                 break;
         if (!m_art.valid())

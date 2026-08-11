@@ -284,17 +284,21 @@ class StableFluidSolver : public FluidSolver {
                 }
             }
         } else {
-            // no-flux at a solid face: use this cell's own pressure across it, so
-            // the gradient there is zero and no velocity is pushed into the body.
-            // solid cells keep their penalized velocity
+            // no-flux at a solid face: use this cell's own pressure across it,
+            // so the gradient there is zero and no velocity is pushed into the
+            // body. solid cells keep their penalized velocity
             for (size_t i = 1; i <= m_nx; i++) {
                 for (size_t j = 1; j <= m_ny; j++) {
                     if (solid_cell(i, j))
                         continue;
-                    const double pR = solid_cell(i + 1, j) ? p(i, j) : p(i + 1, j);
-                    const double pL = solid_cell(i - 1, j) ? p(i, j) : p(i - 1, j);
-                    const double pU = solid_cell(i, j + 1) ? p(i, j) : p(i, j + 1);
-                    const double pD = solid_cell(i, j - 1) ? p(i, j) : p(i, j - 1);
+                    const double pR =
+                        solid_cell(i + 1, j) ? p(i, j) : p(i + 1, j);
+                    const double pL =
+                        solid_cell(i - 1, j) ? p(i, j) : p(i - 1, j);
+                    const double pU =
+                        solid_cell(i, j + 1) ? p(i, j) : p(i, j + 1);
+                    const double pD =
+                        solid_cell(i, j - 1) ? p(i, j) : p(i, j - 1);
                     u(i, j) -= 0.5 / m_h * (pR - pL);
                     v(i, j) -= 0.5 / m_h * (pU - pD);
                 }
@@ -349,24 +353,41 @@ class StableFluidSolver : public FluidSolver {
     }
 
     void set_bnd_channel(int b, Field2D &x) {
-        // left = inflow (Dirichlet), right = outflow (zero-gradient)
+        // left = inflow (Dirichlet), right = outflow
         for (size_t j = 1; j <= m_ny; j++) {
             if (b == 1)
                 x(0, j) = m_inflow; // u = U_in
             else if (b == 2)
                 x(0, j) = 0.0; // v = 0
             else if (b == 3)
-                x(0, j) = m_temp_ambient; // cold fluid enters at the inlet
+                x(0, j) = m_temp_ambient; // inlet temperature
             else
-                x(0, j) = x(1, j); // p: Neumann
-            // outflow: zero-gradient for velocity, Dirichlet p=0 for pressure
-            x(m_nx + 1, j) = (b == 0) ? -x(m_nx, j) : x(m_nx, j);
+                x(0, j) = x(1, j); // pressure Neumann
+
+            // right boundary
+            if (b == 0)
+                x(m_nx + 1, j) = 0.0; // pressure reference
+            else
+                x(m_nx + 1, j) = x(m_nx, j); // zero-gradient outflow
         }
-        // top & bottom = free-slip: tangential zero-grad, normal reflected
+
+        // top & bottom = freestream / far-field
         for (size_t i = 1; i <= m_nx; i++) {
-            x(i, 0) = (b == 2) ? -x(i, 1) : x(i, 1);
-            x(i, m_ny + 1) = (b == 2) ? -x(i, m_ny) : x(i, m_ny);
+            if (b == 1) {
+                x(i, 0) = m_inflow;
+                x(i, m_ny + 1) = m_inflow;
+            } else if (b == 2) {
+                x(i, 0) = 0.0;
+                x(i, m_ny + 1) = 0.0;
+            } else if (b == 3) {
+                x(i, 0) = m_temp_ambient;
+                x(i, m_ny + 1) = m_temp_ambient;
+            } else {
+                x(i, 0) = x(i, 1);
+                x(i, m_ny + 1) = x(i, m_ny);
+            }
         }
+
         x(0, 0) = 0.5 * (x(1, 0) + x(0, 1));
         x(0, m_ny + 1) = 0.5 * (x(1, m_ny + 1) + x(0, m_ny));
         x(m_nx + 1, 0) = 0.5 * (x(m_nx, 0) + x(m_nx + 1, 1));
@@ -717,13 +738,13 @@ class StableFluidSolver : public FluidSolver {
     int m_solid_iters = 1;        // penalize<->project passes; 1 == original
     bool m_solid_project = false; // cut solid out of the pressure solve
     double m_eta = 1e-4;          // penalization permeability (
-    double m_rho = 1.0;  // fluid density (scales the reported force)
-    double m_last_dt = 0.0; // needed to rescale the projection potential
+    double m_rho = 1.0;           // fluid density (scales the reported force)
+    double m_last_dt = 0.0;       // needed to rescale the projection potential
     double m_dens_dissipation = 0.0; // dye decay rate (1/s)
 
     double m_temp_ambient = 0.0; // far-field temperature
-    double m_temp_diff = 0.0;    // thermal diffusivity (conduction in the fluid)
-    double m_temp_relax = 0.0;   // newton cooling toward ambient (1/s)
+    double m_temp_diff = 0.0;  // thermal diffusivity (conduction in the fluid)
+    double m_temp_relax = 0.0; // newton cooling toward ambient (1/s)
 
     Vector2d m_obstacle_force = Vector2d::Zero();
     double m_obstacle_torque = 0.0; // about world origin

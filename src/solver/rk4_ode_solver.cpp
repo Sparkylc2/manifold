@@ -86,9 +86,23 @@ void RK4ODESolver::solve(SystemState *sys) {
         m_accumulator.p[i] += c * sys->v[i];
     }
 
-    for (int i = 0; i < sys->num_c; i++) {
-        m_accumulator.r[i] += c * sys->r[i];
-        m_accumulator.r_t[i] += c * sys->r_t[i];
+    // Reaction forces are an OUTPUT of each stage's solve, not a derivative
+    // being integrated, so they get a plain weighted mean: no dt, and starting
+    // from zero rather than from the previous step. Carrying the old value and
+    // scaling by dt makes the recurrence r <- r(1 + dt), which compounds every
+    // substep. Indexing is [equation * 2 + body], hence r.size() and not the
+    // equation count.
+    const int nr = (int)sys->r.size();
+    const double w = stage_weight / 6.0;
+    if (m_stage == RKStage::Stage_1) {
+        for (int i = 0; i < nr; i++) {
+            m_accumulator.r[i].setZero();
+            m_accumulator.r_t[i] = 0.0;
+        }
+    }
+    for (int i = 0; i < nr; i++) {
+        m_accumulator.r[i] += w * sys->r[i];
+        m_accumulator.r_t[i] += w * sys->r_t[i];
     }
 
     if (m_stage == RKStage::Stage_4) {
@@ -99,7 +113,7 @@ void RK4ODESolver::solve(SystemState *sys) {
             sys->p[i] = m_accumulator.p[i];
         }
 
-        for (int i = 0; i < sys->num_c; i++) {
+        for (int i = 0; i < nr; i++) {
             sys->r[i] = m_accumulator.r[i];
             sys->r_t[i] = m_accumulator.r_t[i];
         }

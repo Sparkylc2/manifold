@@ -9,7 +9,7 @@ namespace manifold::Solver {
 
 SystemState::SystemState() {
     num_b = 0;
-    num_c = 0;
+    num_c_eq = 0;
     dt = 0.0;
 }
 
@@ -20,17 +20,16 @@ void SystemState::copy(const SystemState *state) {
     *this = *state;
 }
 
-void SystemState::resize(int body_count, int constraint_count) {
-    if (num_b >= body_count && num_c >= constraint_count) {
+void SystemState::resize(int body_count, int equation_count) {
+    if (num_b >= body_count && num_c_eq >= equation_count) {
         return;
     }
 
     clear();
 
     num_b = body_count;
-    num_c = constraint_count;
+    num_c_eq = equation_count;
 
-    index_map.resize(num_c);
     a_theta.resize(num_b);
     v_theta.resize(num_b);
     theta.resize(num_b);
@@ -42,8 +41,8 @@ void SystemState::resize(int body_count, int constraint_count) {
     t.resize(num_b);
     m.resize(num_b);
 
-    r.resize((size_t)num_c * 2);
-    r_t.resize((size_t)num_c * 2);
+    r.resize((size_t)num_c_eq * 2);
+    r_t.resize((size_t)num_c_eq * 2);
 }
 
 void SystemState::clear() {
@@ -61,15 +60,13 @@ void SystemState::clear() {
         m.setZero();
     }
 
-    if (num_c > 0) {
-        index_map.clear();
-
+    if (num_c_eq > 0) {
         r.clear();
         r_t.setZero();
     }
 
     num_b = 0;
-    num_c = 0;
+    num_c_eq = 0;
 }
 
 void SystemState::local_to_world(const Vector2d &l, Vector2d *w, int body) {

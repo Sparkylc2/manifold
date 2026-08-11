@@ -147,9 +147,8 @@ void LayeredRenderer::draw_screen_line(int x0, int y0, int x1, int y1,
 
 void LayeredRenderer::draw_smooth_screen_line(int x0, int y0, int x1, int y1,
                                               float thickness, Color color) {
-    push(resolve(Layer::Content),
-         screen_line_cmd(Op::SmoothScreenLine, x0, y0, x1, y1, thickness,
-                         color));
+    push(resolve(Layer::Content), screen_line_cmd(Op::SmoothScreenLine, x0, y0,
+                                                  x1, y1, thickness, color));
 }
 
 void LayeredRenderer::draw_screen_rect(int x, int y, int w, int h,
@@ -166,6 +165,15 @@ void LayeredRenderer::draw_texture(unsigned int tex_id, int tex_w, int tex_h,
     c.i0 = (int)tex_id, c.i1 = tex_w, c.i2 = tex_h, c.i3 = flip_v ? 1 : 0;
     c.a = dst_x, c.b = dst_y, c.c = dst_w, c.d = dst_h;
     c.col = tint;
+    push(resolve(Layer::Content), c);
+}
+
+void LayeredRenderer::draw_shaded(unsigned int shader, const Vertex2D *v,
+                                  int count, Blend blend) {
+    Cmd c{Op::Shaded};
+    c.shader = shader;
+    c.blend = blend;
+    c.verts.assign(v, v + count);
     push(resolve(Layer::Content), c);
 }
 
@@ -210,6 +218,9 @@ void LayeredRenderer::get_mouse_delta(float *dx, float *dy) {
     m_inner->get_mouse_delta(dx, dy);
 }
 
+unsigned int LayeredRenderer::load_shader(const std::string &fs) {
+    return m_inner->load_shader(fs);
+}
 int LayeredRenderer::measure_text(const std::string &text, int font_size) {
     return m_inner->measure_text(text, font_size);
 }
@@ -315,6 +326,10 @@ void LayeredRenderer::execute(const Cmd &c) {
     case Op::TexQuad:
         m_inner->draw_texture((unsigned int)c.i0, c.i1, c.i2, (int)c.a,
                               (int)c.b, (int)c.c, (int)c.d, c.i3 != 0, c.col);
+        break;
+    case Op::Shaded:
+        m_inner->draw_shaded(c.shader, c.verts.data(), (int)c.verts.size(),
+                             c.blend);
         break;
     }
 }

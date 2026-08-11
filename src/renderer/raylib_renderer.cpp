@@ -1,3 +1,4 @@
+#include "raylib.h"
 #include <manifold/renderer/raylib_renderer.h>
 
 #include <algorithm>
@@ -56,6 +57,11 @@ void RaylibRenderer::shutdown() {
         UnloadRenderTexture(m_render_target);
         UnloadShader(m_fxaa_shader);
     }
+
+    for (const auto &it : m_shaders) {
+        UnloadShader(it.second);
+    }
+
     if (m_smooth_line_shader_loaded)
         UnloadShader(m_smooth_line_shader);
     CloseWindow();
@@ -410,6 +416,23 @@ void RaylibRenderer::draw_texture(unsigned int tex_id, int tex_w, int tex_h,
     DrawTexturePro(t, src, dst, {0, 0}, 0.0f, detail::to_rl(tint));
 }
 
+unsigned int RaylibRenderer::load_shader(const std::string &fs) {
+    if (!FileExists(fs.c_str())) {
+        TraceLog(LOG_WARNING, "shader not found (cwd-relative): %s",
+                 fs.c_str());
+        return 0;
+    }
+
+    Shader s = LoadShader(nullptr, fs.c_str());
+
+    if (s.id == rlGetShaderIdDefault()) {
+        TraceLog(LOG_WARNING, "shader failed to compile: %s", fs.c_str());
+        return 0;
+    }
+
+    m_shaders[s.id] = s;
+    return s.id;
+}
 int RaylibRenderer::measure_text(const std::string &text, int font_size) {
     if (m_has_custom_font)
         return (int)measure_proportional(m_font, text.c_str(),
@@ -526,6 +549,36 @@ void RaylibRenderer::draw_aa_line(float x0, float y0, float x1, float y1,
         EndShaderMode();
 }
 
+void RaylibRenderer::draw_shaded(unsigned int shader, const Vertex2D *v,
+                                 int count, Blend blend) {
+    if (count <= 0)
+        return;
+
+    BeginBlendMode(blend == Blend::Additive ? BLEND_ADDITIVE : BLEND_ALPHA);
+    auto it = m_shaders.find(shader);
+    const bool custom = shader && it != m_shaders.end();
+
+    if (custom)
+        BeginShaderMode(it->second);
+
+    rlSetTexture(rlGetTextureIdDefault());
+
+    rlDisableBackfaceCulling();
+    rlBegin(RL_TRIANGLES);
+    for (int i = 0; i < count; i++) {
+        rlColor4ub(v[i].color.r, v[i].color.g, v[i].color.b, v[i].color.a);
+        rlTexCoord2f(v[i].u, v[i].v);
+        rlVertex2f(w2sx(v[i].x), w2sy(v[i].y));
+    }
+    rlEnd();
+    rlDrawRenderBatchActive();
+    rlEnableBackfaceCulling();
+    rlSetTexture(0);
+
+    if (custom)
+        EndShaderMode();
+    EndBlendMode();
+}
 // ---- font loading ----
 
 void RaylibRenderer::load_font(const std::string &path, int base_size) {
@@ -606,7 +659,7 @@ void RaylibRenderer::init_fxaa() {
     m_rt_width = sw;
     m_rt_height = sh;
 
-    m_fxaa_shader = LoadShader(nullptr, "assets/shaders/fxaa.fs");
+    m_fxaa_shader = LoadShader(nullptr, "../assets/shaders/fxaa.fs");
     m_fxaa_resolution_loc = GetShaderLocation(m_fxaa_shader, "resolution");
     set_fxaa_resolution();
 }
@@ -619,9 +672,9 @@ void RaylibRenderer::set_fxaa_resolution() {
 
 // ---- smooth line shader setup ----
 void RaylibRenderer::init_smooth_line_shader() {
-    if (FileExists("assets/shaders/smooth_line.fs")) {
+    if (FileExists("../assets/shaders/smooth_line.fs")) {
         m_smooth_line_shader =
-            LoadShader(nullptr, "assets/shaders/smooth_line.fs");
+            LoadShader(nullptr, "../assets/shaders/smooth_line.fs");
         m_smooth_line_shader_loaded = true;
     }
 }
