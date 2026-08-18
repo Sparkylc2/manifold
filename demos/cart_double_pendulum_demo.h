@@ -29,7 +29,7 @@ class CartDoublePendulumDemo : public DemoBase {
   public:
     // bottom-left of the slot's grid patch, which spans x[-4, 4] y[-2.9, 3.5]
     // in these coords -- see the cart slot in StoryDemo::build_frames
-    static constexpr double ModeX = -3.85, ModeY = -2.42;
+    static constexpr double ModeX = -2.3, ModeY = -2.42;
     static constexpr int ModeSize = 14;
 
     static constexpr double CartMass = 5.0;
@@ -175,7 +175,8 @@ class CartDoublePendulumDemo : public DemoBase {
         m_kick_force = 0.0;
         if (m_t < m_kick_until) {
             const double u = 1.0 - (m_kick_until - m_t) / m_kick_dur;
-            m_kick_force = m_kick_amp * std::sin(M_PI * std::clamp(u, 0.0, 1.0));
+            m_kick_force =
+                m_kick_amp * std::sin(M_PI * std::clamp(u, 0.0, 1.0));
             m_kick.arm_force(Vector2d(m_kick_force, 0.0));
         }
 
@@ -228,7 +229,7 @@ class CartDoublePendulumDemo : public DemoBase {
         Rendering::Layer l = r->current_layer();
         r->set_layer(Rendering::Layer::Content);
         if (std::abs(m_cart.p.x()) > 0.02)
-            Rendering::draw_displacement(r, 0.01, GroundY, m_cart.p.x(),
+            Rendering::draw_displacement(r, -0.03, GroundY, m_cart.p.x(),
                                          GroundY, "x = %.2f m", m_cart.p.x(),
                                          2.0f, a1, 0.0, {.offset = -0.62});
 
@@ -253,9 +254,8 @@ class CartDoublePendulumDemo : public DemoBase {
         // the kick rides its own fixed reference, not a decaying peak: an
         // isolated pulse would pin a peak-normalised arrow at full length from
         // the first frame, which is the pop we are trying to avoid
-        const double ku =
-            std::clamp(std::abs(m_kick_shown) / std::max(m_kick_ref, 1e-3), 0.0,
-                       1.0);
+        const double ku = std::clamp(
+            std::abs(m_kick_shown) / std::max(m_kick_ref, 1e-3), 0.0, 1.0);
         if (ku > 0.02) {
             const double len = L2 * (0.06 + 0.55 * std::pow(ku, 0.7));
             const double dir = m_kick_shown > 0 ? 1.0 : -1.0;

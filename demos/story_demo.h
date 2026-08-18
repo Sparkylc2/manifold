@@ -3,16 +3,19 @@
 #include "cells/cell_adapters.h"
 #include "cells/cylinder_flutter_cell.h"
 
+#include "ae_compress_demo.h"
 #include "aerofoil_flutter_demo.h"
 #include "cart_double_pendulum_demo.h"
-#include "engine_demo.h"
-#include "esn_karman_demo.h"
+#include "circuit_demo.h"
+#include "collapse_demo.h"
 #include "fea_flutter_demo.h"
+#include "forecast_karman_demo.h"
 #include "info_demo.h" // InfoFlutterCell, InfoCrank, InfoPendulum
 #include "jansen_demo.h"
 #include "nozzle_demo.h"
 #include "pod_karman_demo.h"
 #include "showcase2_demo.h" // ShowcaseRadial
+#include "wave_demo.h"
 
 #include <manifold/app/cell_scheduler.h>
 #include <manifold/renderer/demo_base.h>
@@ -122,7 +125,7 @@ class StoryDemo : public DemoBase {
 
         // jump to a frame while editing. replays the physics from zero, which
         // is the only honest way to get a warmed vortex street at t = 20
-        for (int i = 0; i < (int)m_frames.size() && i < 4; i++)
+        for (int i = 0; i < (int)m_frames.size() && i < 5; i++)
             if (r->is_key_pressed(Rendering::keys::A + i))
                 m_sched.seek(m_frames[i].t_in + 1.0);
     }
@@ -267,7 +270,7 @@ class StoryDemo : public DemoBase {
                  // 0.1042); anything below ~0.71 flips it to width-limited and
                  // hf stops controlling the size.
                  {.cell = &m_cart,
-                  .xf = 0.0081,
+                  .xf = -0.1,
                   .yf = 0.35,
                   .wf = 0.75,
                   .hf = 0.32,
@@ -281,8 +284,29 @@ class StoryDemo : public DemoBase {
                   .ghh = 3.20,
                   .gspacing = 1.05},
 
-                 {&m_engine, 0.40, 0.70, 0.58, 0.22, true, -1.0, -1.45, -1.45,
-                  0.70, 0.70, 2.40, 2.40, 0.85},
+                 // axes on the mast centreline where it meets the ground, so
+                 // the vertical runs up between the legs rather than along one.
+                 // one grid square to the bay height, which is what makes the
+                 // lattice read as regular against it
+                 {.cell = &m_crane,
+                  .xf = 0.35,
+                  .yf = 0.68,
+                  .wf = 0.62,
+                  .hf = 0.28,
+                  .grid = true,
+                  .cap_yf = -1.0,
+                  .gx = CollapseDemo::Mirror * 0.5 * CollapseDemo::LegW,
+                  .gy = CollapseDemo::FloorY,
+                  .gcx = -3.9,
+                  .gcy = 2.85,
+                  .ghw = 4.2,
+                  .ghh = 3.2,
+                  .gspacing = CollapseDemo::BayH,
+                  // the swept arc makes this cell wide, so fitting it inside
+                  // the strip leaves it small; overflow the slot instead and
+                  // pin the right edge, which is where the tower stands
+                  .zoom = 1.10,
+                  .anchor_x = 1.0},
              },
              "",
              ""});
@@ -295,7 +319,7 @@ class StoryDemo : public DemoBase {
                  {.cell = &m_beam,
                   .xf = 0.04,
                   .yf = 0.055,
-                  .wf = 0.92,
+                  .wf = 1.1,
                   .hf = 0.23,
                   .grid = false,
                   .cap_yf = -1.0,
@@ -308,18 +332,18 @@ class StoryDemo : public DemoBase {
                  //   nozzle    0.7154 x 0.3378 sw, y 0.310 .. 0.500
                  //   aerofoil  0.4469 x 0.8000 sw, y 0.530 .. 0.980
                  {.cell = &m_nozzle,
-                  .xf = -0.17,
+                  .xf = -0.2,
                   .yf = -0.05,
-                  .wf = 1.0,
+                  .wf = 1.2,
                   .hf = 1.0,
                   .grid = false,
                   .cap_yf = -1.0,
                   .group = 1},
                  {.cell = &m_flutter,
-                  .xf = 0.03,
+                  .xf = -0.2,
                   .yf = 0.53,
-                  .wf = 0.94,
-                  .hf = 0.45,
+                  .wf = 0.95,
+                  .hf = 0.55,
                   .grid = false,
                   .cap_yf = -1.0,
                   .group = -1},
@@ -328,20 +352,59 @@ class StoryDemo : public DemoBase {
              ""});
 
         // frame 15 — reduced-order models. both warm far longer than their
-        // frame is on screen: the snapshot window has to fill and the fit has
-        // to run before there is a basis to draw at all
-        m_frames.push_back({at(3),
-                            at(4),
+        // frame is on screen: POD's snapshot window has to fill and its fit has
+        // to run before there is a basis to draw at all, and the forecast pair
+        // needs a street as developed as the one its checkpoint was fitted to
+        m_frames.push_back(
+            {at(3),
+             at(4),
+             {
+                 // width-limited (slot ratio 1.18 vs cell
+                 // aspect 2.12), so wf sets the size: inset a
+                 // little rather than spanning the full strip
+                 {&m_pod, 0.06, 0.018, 0.88, 0.26, false, -1.0},
+                 // pushed right: the left half of the strip is
+                 // reserved for the caption block added in post
+                 {&m_ae, 0.50, 0.316, 0.48, 0.28, false, -1.0},
+                 // Three bands with real gaps between them, all
+                 // height-limited so hf sets the drawn size:
+                 //   POD  0.030 .. 0.266 (width-limited, centred)
+                 //   AE   0.316 .. 0.596
+                 //   fc   0.646 .. 0.986
+                 // 0.05 sh of clear air at each junction, ~96 px
+                 // every caption is drawn at a fixed PIXEL offset
+                 // from its anchor, so each cell's bounds carry
+                 // enough world-space slack to hold its own text
+                 // at the size that slot draws it -- that
+                 // overflow is what made them clip
+                 {&m_forecast, 0.04, 0.646, 0.92, 0.34, false, -1.0},
+             },
+             "",
+             "",
+             0.90});
+
+        // frame 16 — the closer. The cart pendulum with the op-amp card that
+        // actually balances it, then clear air, then the drum.
+        m_frames.push_back({at(4),
+                            at(5),
                             {
-                                // width-limited (slot ratio 1.18 vs cell
-                                // aspect 2.12), so wf sets the size: inset a
-                                // little rather than spanning the full strip
-                                {&m_pod, 0.06, 0.02, 0.88, 0.42, false, -1.0},
-                                {&m_esn, 0.02, 0.48, 0.62, 0.24, false, -1.0},
+                                {.cell = &m_pid,
+                                 .xf = 0.01,
+                                 .yf = 0.035,
+                                 .wf = 0.98,
+                                 .hf = 0.62,
+                                 .grid = false,
+                                 .cap_yf = -1.0},
+                                {.cell = &m_drum,
+                                 .xf = 0.0,
+                                 .yf = 0.70,
+                                 .wf = 1.0,
+                                 .hf = 0.27,
+                                 .grid = false,
+                                 .cap_yf = -1.0},
                             },
                             "",
-                            "",
-                            0.84});
+                            ""});
     }
 
     enum class Mode { Reel, Solo };
@@ -459,8 +522,8 @@ class StoryDemo : public DemoBase {
                           m_sched.time(), m_sched.stepping_count(),
                           m_sched.count());
         }
-        r->draw_text(buf, 12, r->screen_height() - 24, 14,
-                     Rendering::palette::accent3());
+        // r->draw_text(buf, 12, r->screen_height() - 24, 14,
+        //              Rendering::palette::accent3());
     }
 
     void centred(Rendering::Renderer *r, const std::string &s, double yf,
@@ -532,7 +595,12 @@ class StoryDemo : public DemoBase {
         0.0,
         "double-pendulum swing-up",
         [](CartDoublePendulumDemo &d) { d.set_stage_kicks(true); }};
-    DemoCell<EngineDemo> m_engine{{-2.7, -1.4, 2.7, 3.5}, 1.5, "V-twin engine"};
+    // the demo states its own drawn extent: the swept arc is what makes it
+    // wide, and the ball needs that room even though most of it is empty
+    DemoCell<CollapseDemo> m_crane{{CollapseDemo::CellX0, CollapseDemo::CellY0,
+                                    CollapseDemo::CellX1, CollapseDemo::CellY1},
+                                   1.2,
+                                   "lattice crane"};
 
     // rotated a quarter turn, so the plume runs down the frame: the field
     // spans (-R, -NX*CELL)..(R, 0) once turned. +y is the F-22 art, which now
@@ -563,15 +631,49 @@ class StoryDemo : public DemoBase {
         {-9.0, -10.4, 22.5, 4.6}, 30.0, "POD modes", [](PODKarmanDemo &d) {
             d.set_auto_reveal(true);
         }};
-    DemoCell<ESNKarmanDemo> m_esn{
-        {-9.0, -10.5, 12.0, 6.0}, 40.0, "echo-state forecast"};
+    // warmup lands a second short of the demo's own FIRST_FC, so the frame
+    // opens on live flow and both models cut loose almost immediately. bounds
+    // are the three panels plus the error plot, with headroom for the labels
+    // each one hangs above itself
+    // stacked live-over-reconstruction with the funnel between, so the cell is
+    // tall and narrow; bounds are the two cropped bands plus label headroom
+    DemoCell<AECompressDemo> m_ae{
+        {AECompressDemo::BOUND_X0, AECompressDemo::BOUND_Y0,
+         AECompressDemo::BOUND_X1, AECompressDemo::BOUND_Y1},
+        AECompressDemo::WARM,
+        "autoencoder compression"};
+
+    // The PID page turned a quarter so the signal runs down the frame: the
+    // sources land at the top, V_out at the bottom. PidArt states its own
+    // extent, and the turn swaps the axes.
+    DemoCell<CircuitDemo> m_pid{
+        {PidArt::Y0, -PidArt::X1, PidArt::Y1_PLAIN, -(PidArt::XSRC - 1.75)},
+        3.0, // long enough for the leaky integrator to reach its cycle
+        "analog PID",
+        [](CircuitDemo &d) { d.set_scene(4); }};
+
+    // Not the panel: the drum is a SPAN-wide disk seen from a camera set back
+    // far enough that it covers only the middle ~56% of the PANEL square the
+    // 3D target composites into. Bounding the panel would draw the disk at
+    // little over half the size its slot allows.
+    static constexpr double DRUM = 0.29 * WaveDemo::PANEL;
+    DemoCell<WaveDemo> m_drum{{-DRUM, -DRUM, DRUM, DRUM},
+                              2.2, // opens mid-ring, not on the seeded mode
+                              "wave equation",
+                              [](WaveDemo &d) { d.set_auto_pluck(2.2); }};
+
+    DemoCell<ForecastKarmanDemo> m_forecast{
+        {ForecastKarmanDemo::BOUND_X0, ForecastKarmanDemo::BOUND_Y0,
+         ForecastKarmanDemo::BOUND_X1, ForecastKarmanDemo::BOUND_Y1},
+        ForecastKarmanDemo::FIRST_FC - 1.0,
+        "ESN vs LSTM forecast"};
 
     App::CellScheduler m_sched;
     std::vector<Frame> m_frames;
     std::vector<Group> m_groups;
 
     Mode m_mode = Mode::Solo; // staging one at a time is the default workflow
-    int m_solo = 0;
+    int m_solo = 4;
     bool m_solo_captions = false; // captions get their own overlay pass
     bool m_debug = true;
 };

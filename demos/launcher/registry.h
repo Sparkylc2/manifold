@@ -38,6 +38,18 @@ inline void populate_registry(DemoRegistry &registry) {
 
     registry.add(Demo::make_truss_demo,"truss", "Truss Structure", "Misc",
                                   "Watch truss loads");
+
+    registry.add(Demo::make_collapse_demo,
+        "collapse", "Crane", "Structures",
+        "Triangulated lattice crane coloured by live axial force; the hoist "
+        "ball swings through a 60 deg arc and the readout tracks the peak "
+        "tension and compression it drives through the jib");
+
+    registry.add(Demo::make_huygens_demo,
+        "huygens", "Huygens Sync", "Oscillators",
+        "Detuned pendulum clocks on a beam free to slide: they pull each other "
+        "into step through the beam alone. [SPACE] bolts it down and the "
+        "synchronisation falls apart");
     registry.add(Demo::make_solar_system_demo,
         "solar_system", "Solar System", "Gravity",
         "Orbital mechanics with click-to-launch asteroids and collisions");
@@ -108,6 +120,20 @@ inline void populate_registry(DemoRegistry &registry) {
         "karman_cae", "Karman CAE ", "Fluids",
         "Convolutional autoencoder trained live on a background thread: "
         "reconstructs a coarse velocity field, sharpening as it learns");
+
+    registry.add(Demo::make_ae_compress_demo,
+        "karman_ae_compress", "Karman AE Compression", "Fluids",
+        "A pretrained dense autoencoder as a funnel: the live velocity field "
+        "goes in at 40 000 numbers, crosses the waist as five, and comes back "
+        "out the other side -- the only thing that passed between the two "
+        "panels is the row of dots in the middle");
+
+    registry.add(Demo::make_forecast_karman_demo,
+        "karman_forecast", "Karman ESN vs LSTM", "Fluids",
+        "One live vortex street, one pretrained autoencoder latent, two "
+        "forecasters racing it: the flow freezes, an echo-state network and an "
+        "LSTM run free for a couple of seconds, then reality catches up and "
+        "draws the error each of them accumulated");
 
     registry.add(Demo::make_aerofoil_flutter_demo,
         "aerofoil", "Aerofoil Flutter", "Fluids",

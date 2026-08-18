@@ -193,15 +193,23 @@ class CachedSdf {
         const double gx = (p.x() - m_lo) / m_h;
         const double gy = (p.y() - m_lo) / m_h;
 
-        // outside the cached box the distance to the box under-estimates the
-        // distance to the shape, and is only ever read far from the surface
-        // where all the solver wants to know is "fluid"
-        if (gx < 0.0 || gy < 0.0 || gx > (double)m_grid.m_W - 1.0 ||
-            gy > (double)m_grid.m_H - 1.0) {
-            const Vector2d d = p.cwiseAbs() + Vector2d(m_lo, m_lo);
-            return d.cwiseMax(0.0).norm();
-        }
-        return bilerp(m_grid, gx, gy);
+        // Outside the cached box, walk to the nearest cached sample and add
+        // how far beyond the box the query is.
+        //
+        // Returning the bare distance to the box was wrong by the whole
+        // half-extent: it goes to ZERO on the box boundary while the real
+        // distance to the shape there is the better part of a chord. A solver
+        // that only tests the SIGN never notices, but one that reads the
+        // magnitude -- penalization builds its mask as 0.5 - sdf/h -- sees a
+        // solid band tracing the box, rotating with the body.
+        const double ex = (double)m_grid.m_W - 1.0;
+        const double ey = (double)m_grid.m_H - 1.0;
+        const Vector2d d = p.cwiseAbs() + Vector2d(m_lo, m_lo);
+        const double outside = d.cwiseMax(0.0).norm();
+
+        return bilerp(m_grid, std::clamp(gx, 0.0, ex),
+                      std::clamp(gy, 0.0, ey)) +
+               outside;
     }
 
   private:

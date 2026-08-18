@@ -122,6 +122,17 @@ class Renderer {
         (void)shader, (void)verts, (void)count, (void)blend;
     }
 
+    // Diverts everything drawn between the two calls into an offscreen buffer,
+    // then composites that buffer back through `shader`. Colour blends
+    // normally inside; ALPHA ACCUMULATES, which is the whole point: a shader
+    // that thresholds the accumulated alpha makes overlapping primitives fuse
+    // into one contour instead of merely overlapping.
+    virtual void begin_offscreen() {}
+    virtual void end_offscreen(unsigned int shader,
+                               Blend blend = Blend::Alpha) {
+        (void)shader, (void)blend;
+    }
+
     // rendered width of text in the active font, in pixels
     virtual int measure_text(const std::string &text, int font_size) = 0;
     virtual unsigned int load_shader(const std::string &fs_path) {

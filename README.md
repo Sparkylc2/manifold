@@ -6,6 +6,8 @@ A modular physics simulation and rendering framework in C++20, built for myself 
 
 Can't lie don't really update this much, probably outdated? When projects grow
 
+I also want to be very explicit that, especially towards the end of this project (when configuring videos, fixing stability issues for higher grid resolutions, etc.) almost all significant changes were done using Claude Code
+
 
 
 The goal was to get a foundation upon which I can rapidly iterate and work on a number of projects. Each module (the solver, renderer, etc.), are meant to be self-contained libraries that can be composed into demos. 

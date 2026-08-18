@@ -2,6 +2,8 @@
 
 #include <manifold/renderer/renderer.h>
 
+#include <vector>
+
 namespace manifold::Rendering {
 
 // places a self-contained cell somewhere else in the world
@@ -70,6 +72,16 @@ class TransformRenderer : public Renderer {
                       int dst_y, int dst_w, int dst_h, bool flip_v,
                       Color tint = Color::hex(0xFFFFFFFFu)) override;
 
+    // without these two the base class's no-op defaults apply, and any cell
+    // drawing through a shader (the fluid tracers) silently renders nothing
+    // once it is placed in a slot
+    void draw_shaded(unsigned int shader, const Vertex2D *v, int count,
+                     Blend blend) override;
+    unsigned int load_shader(const std::string &fs_path) override;
+
+    void begin_offscreen() override;
+    void end_offscreen(unsigned int shader, Blend blend) override;
+
     // inverted so FieldView's world_to_screen lands correctly
     void screen_to_world(int sx, int sy, double *wx, double *wy) override;
     void world_to_screen(double wx, double wy, int *sx, int *sy) override;
@@ -109,6 +121,7 @@ class TransformRenderer : public Renderer {
 
     Renderer *m_inner;
     double m_ox, m_oy, m_scale, m_alpha;
+    std::vector<Vertex2D> m_scratch; // transformed copy for draw_shaded
 };
 
 } // namespace manifold::Rendering

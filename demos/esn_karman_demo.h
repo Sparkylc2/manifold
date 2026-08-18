@@ -57,6 +57,9 @@ class ESNKarmanDemo : public DemoBase {
     static constexpr double PERT_MIN = 0.05 * INFLOW;
     static constexpr double PERT_REF = 0.60 * INFLOW;
     static constexpr int FADE_PX = 18;
+    // world-space taper on the domain walls, matching the aerofoil and FEA
+    // cells: smootherstep has no slope break for the eye to read as a line
+    static constexpr double EDGE_PAD = 1.2;
 
     static constexpr int N_CAP = 160; // AE training window
     static constexpr uint STRIDE = 3;
@@ -207,12 +210,14 @@ class ESNKarmanDemo : public DemoBase {
 
         m_field.render(
             r, o.x(), o.y(), CELL,
-            [this, vmax](double wx, double wy, double &val, double &a) {
+            [this, vmax, o](double wx, double wy, double &val, double &a) {
                 Vector2d v;
                 m_fluid.velocity_at(Vector2d(wx, wy), &v,
                                     Fluid::Interp::Linear);
                 val = v.norm() / vmax;
-                a = freestream_alpha(v.x(), v.y());
+                a = freestream_alpha(v.x(), v.y()) *
+                    Rendering::window_alpha(wx - o.x(), wy - o.y(), 0.0, 0.0, W,
+                                            H, EDGE_PAD);
             });
         r->draw_circle(m_center.x(), m_center.y(), RADIUS,
                        Rendering::palette::foreground());
@@ -491,7 +496,6 @@ class ESNKarmanDemo : public DemoBase {
                            int ss) {
         fv.init(nx, ny,
                 {.supersample = ss,
-                 .edge_fade_px = FADE_PX,
                  .gamma = 0.29,
                  .colorbar = bar,
                  .bar_margin = 24},
@@ -527,7 +531,10 @@ class ESNKarmanDemo : public DemoBase {
                                  const double u = m_recon[cc],
                                               v = m_recon[nc + cc];
                                  val = std::hypot(u, v) / vmax;
-                                 a = freestream_alpha(u, v);
+                                 a = freestream_alpha(u, v) *
+                                     Rendering::window_alpha(
+                                         wx - rox, wy - roy, 0.0, 0.0, W, H,
+                                         EDGE_PAD);
                              });
         const Vector2d mc = m_center - o + Vector2d(rox, roy);
         r->draw_circle(mc.x(), mc.y(), RADIUS,

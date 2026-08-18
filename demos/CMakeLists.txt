@@ -4,6 +4,7 @@ find_package(Threads REQUIRED)
 # so editing a demo rebuilds only that demo and the 37 build in parallel.
 # a name here is both factories/<name>.cpp and Demo::make_<name>()
 set(MANIFOLD_ALL_DEMOS
+    ae_compress_demo
     ae_karman_demo
     aerofoil_elevator_demo
     aerofoil_flutter_demo
@@ -11,6 +12,7 @@ set(MANIFOLD_ALL_DEMOS
     cart_double_pendulum_demo
     cart_pendulum_demo
     circuit_demo
+    collapse_demo
     crank_slider
     cube_demo
     deformation_jacobian_demo
@@ -21,8 +23,10 @@ set(MANIFOLD_ALL_DEMOS
     fea_flutter_demo
     fluid_demo
     flutter_demo
+    forecast_karman_demo
     graphics_test_demo
     heat_demo
+    huygens_demo
     info_demo
     jansen_demo
     karman_demo

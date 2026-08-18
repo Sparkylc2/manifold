@@ -19,6 +19,13 @@ using Vector2d = Eigen::Vector2d;
 
 class TrussDemo : public DemoBase {
   public:
+    // every joint acting on one end of a bar: (link index, which body slot of
+    // that link is this bar), plus any support pin anchored there
+    struct EndRefs {
+        std::vector<std::pair<int, int>> links;
+        std::vector<const Solver::Constraint *> pins;
+    };
+
     static constexpr int Bays = 4;
     static constexpr double BayWidth = 2.0;
     static constexpr double TrussHeight = 1.5;
@@ -42,6 +49,10 @@ class TrussDemo : public DemoBase {
         m_bar_lengths.clear();
         m_node_positions.clear();
         m_bar_node_ids.clear();
+        m_end_a.clear();
+        m_end_b.clear();
+        m_axial.clear();
+        m_peak = ForceColorScale;
 
         // --- define node positions ---
         int n = Bays + 1;
@@ -77,6 +88,9 @@ class TrussDemo : public DemoBase {
         m_bars.resize(num_bars);
         m_bar_lengths.resize(num_bars);
         m_bar_node_ids.resize(num_bars);
+        m_end_a.resize(num_bars);
+        m_end_b.resize(num_bars);
+        m_axial.assign(num_bars, 0.0);
 
         for (int i = 0; i < num_bars; ++i) {
             auto [na, nb] = member_defs[i];
@@ -144,6 +158,12 @@ class TrussDemo : public DemoBase {
                 lc.set_ks(100.0);
                 lc.set_kd(10.0);
                 m_system.add_constraint(&lc);
+
+                // which bar end each side of this joint pulls on: the axial
+                // sign depends on it, and the hub bar collects several joints
+                const int li = (int)m_links.size() - 1;
+                end_of(anchor_bar, anchor_is_b).links.push_back({li, 0});
+                end_of(other_bar, other_is_b).links.push_back({li, 1});
             }
         }
 
@@ -163,6 +183,7 @@ class TrussDemo : public DemoBase {
         m_pin_left.set_kd(10.0);
         m_system.add_constraint(&m_pin_left);
         m_pin_left_bar = lb_idx;
+        end_of(lb_idx, lb_is_b).pins.push_back(&m_pin_left);
 
         // pin right end of rightmost bottom bar
         int right_node = Bays;
@@ -180,13 +201,17 @@ class TrussDemo : public DemoBase {
         m_pin_right.set_kd(10.0);
         m_system.add_constraint(&m_pin_right);
         m_pin_right_bar = rb_idx;
+        end_of(rb_idx, rb_is_b).pins.push_back(&m_pin_right);
 
         m_grabbed_body = nullptr;
         m_mouse_spring.set_active(false);
         m_mouse_spring.set_ks(200.0);
     }
 
-    void process(double dt) override { m_system.process(dt, SimSteps); }
+    void process(double dt) override {
+        m_system.process(dt, SimSteps);
+        update_axial();
+    }
 
     void render(Rendering::Renderer *r) override {
         draw_grid(r);
@@ -261,44 +286,57 @@ class TrussDemo : public DemoBase {
   private:
     void render_bar(Rendering::Renderer *r, int idx) {
         auto &bar = m_bars[idx];
-        double length = m_bar_lengths[idx];
+        double t = std::clamp(m_axial[idx] / m_peak, -1.0, 1.0);
 
-        // compute axial force from link constraints involving this bar
-        // sum constraint forces along the bar axis
-        double axial = compute_bar_axial_force(idx);
-        double t = std::clamp(axial / ForceColorScale, -1.0, 1.0);
-
-        Rendering::Color fill;
-        if (t > 0) {
-            double s = std::abs(t);
-            fill = Rendering::Color::rgba(
-                255, (unsigned char)(255 * (1.0 - 0.7 * s)),
-                (unsigned char)(255 * (1.0 - 0.8 * s)));
-        } else {
-            double s = std::abs(t);
-            fill = Rendering::Color::rgba(
-                (unsigned char)(255 * (1.0 - 0.8 * s)),
-                (unsigned char)(255 * (1.0 - 0.5 * s)), 255);
-        }
-
-        r->draw_bar(bar.p.x(), bar.p.y(), bar.theta, length, BarWidth, fill,
-                    Rendering::palette::shadow());
+        r->draw_bar(bar.p.x(), bar.p.y(), bar.theta, m_bar_lengths[idx],
+                    BarWidth, force_color(t), Rendering::palette::shadow());
     }
 
-    double compute_bar_axial_force(int bar_idx) {
-        // find any link constraint involving this bar and get the force
-        Vector2d bar_axis(std::cos(m_bars[bar_idx].theta),
-                          std::sin(m_bars[bar_idx].theta));
+    // total constraint force delivered to one end of a bar. a bar end can be
+    // held by several joints at once (the node's hub bar carries one link per
+    // partner) plus a support pin, so they all have to be summed
+    Vector2d end_force(const EndRefs &e) const {
+        Vector2d f = Vector2d::Zero();
+        for (auto [li, slot] : e.links)
+            f += m_links[li].F_xy[0][slot] + m_links[li].F_xy[1][slot];
+        for (const auto *pin : e.pins)
+            f += pin->F_xy[0][0] + pin->F_xy[1][0];
+        return f;
+    }
 
-        for (auto &lc : m_links) {
-            for (int bi = 0; bi < 2; ++bi) {
-                if (lc.m_bodies[bi] == &m_bars[bar_idx]) {
-                    Vector2d force = lc.F_xy[0][bi] + lc.F_xy[1][bi];
-                    return force.dot(bar_axis);
-                }
-            }
+    // + = tension. â runs A -> B, so a force along +â pulls B outward but
+    // pushes A inward: each end projects onto its own outward direction.
+    // self-weight makes the two ends differ, so take the mean.
+    double compute_bar_axial_force(int i) const {
+        Vector2d axis(std::cos(m_bars[i].theta), std::sin(m_bars[i].theta));
+        return 0.5 * (end_force(m_end_b[i]).dot(axis) -
+                      end_force(m_end_a[i]).dot(axis));
+    }
+
+    void update_axial() {
+        double peak = 0;
+        for (int i = 0; i < (int)m_bars.size(); ++i) {
+            m_axial[i] = compute_bar_axial_force(i);
+            peak = std::max(peak, std::abs(m_axial[i]));
         }
-        return 0;
+        // decaying peak: the palette keeps its full range as loads change
+        m_peak = std::max(ForceColorScale, std::max(peak, m_peak * 0.995));
+    }
+
+    static Rendering::Color force_color(double t) {
+        auto base = Rendering::palette::foreground();
+        auto hot = t > 0 ? Rendering::palette::accent1()
+                         : Rendering::palette::accent2();
+        double s = std::sqrt(std::min(std::abs(t), 1.0));
+        auto mix = [&](unsigned char a, unsigned char b) {
+            return (unsigned char)std::lround(a + (b - a) * s);
+        };
+        return Rendering::Color::rgba(mix(base.r, hot.r), mix(base.g, hot.g),
+                                      mix(base.b, hot.b));
+    }
+
+    EndRefs &end_of(int bar, bool is_end_b) {
+        return is_end_b ? m_end_b[bar] : m_end_a[bar];
     }
 
     void draw_support(Rendering::Renderer *r, double x, double y) {
@@ -347,24 +385,21 @@ class TrussDemo : public DemoBase {
 
     void render_hud(Rendering::Renderer *r) {
         double max_t = 0, max_c = 0;
-        for (int i = 0; i < (int)m_bars.size(); ++i) {
-            double f = compute_bar_axial_force(i);
+        for (double f : m_axial) {
             if (f > 0)
                 max_t = std::max(max_t, f);
             else
                 max_c = std::max(max_c, -f);
         }
 
-        Rendering::HUDPanel hud(r, 12, 12);
+        Rendering::HUDPanel hud(r, hud_x(r), 12);
         hud.title("TRUSS (BAR MODEL)", Rendering::palette::accent2());
         hud.line(Rendering::palette::text(), "Bays:    %d", Bays);
         hud.line(Rendering::palette::text(), "Bars:    %d", (int)m_bars.size());
         hud.line(Rendering::palette::text(), "Joints:  %d",
                  (int)m_links.size());
-        hud.line(Rendering::Color::rgba(255, 100, 80), "Max T:   %.2f N",
-                 max_t);
-        hud.line(Rendering::Color::rgba(80, 150, 255), "Max C:   %.2f N",
-                 max_c);
+        hud.line(Rendering::palette::accent1(), "Max T:   %.2f N", max_t);
+        hud.line(Rendering::palette::accent2(), "Max C:   %.2f N", max_c);
         hud.separator();
         hud.small_text("[LMB] Pull bar  [R] Reset  [H] Home",
                        Rendering::palette::text_dim());
@@ -379,6 +414,10 @@ class TrussDemo : public DemoBase {
     std::vector<std::pair<int, int>> m_bar_node_ids;
     std::vector<Vector2d> m_node_positions;
     std::vector<Solver::LinkConstraint> m_links;
+
+    std::vector<EndRefs> m_end_a, m_end_b; // end_a = local -L/2, end_b = +L/2
+    std::vector<double> m_axial;
+    double m_peak = ForceColorScale;
 
     Solver::FixedPositionConstraint m_pin_left, m_pin_right;
     int m_pin_left_bar = -1, m_pin_right_bar = -1;

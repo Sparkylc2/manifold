@@ -8,3 +8,14 @@ add_custom_command(TARGET manifold POST_BUILD
     ${CMAKE_SOURCE_DIR}/assets $<TARGET_FILE_DIR:manifold>/assets
     COMMENT "Copying assets to build directory"
 )
+
+# POST_BUILD only fires when the exe relinks, so editing a shader alone left a
+# stale copy running and the change looked like it had no effect. Shaders are a
+# few KB, so re-copy them every build; the 57 MB of fonts and art stay on the
+# relink hook.
+add_custom_target(manifold_shaders ALL
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_SOURCE_DIR}/assets/shaders $<TARGET_FILE_DIR:manifold>/assets/shaders
+    COMMENT "Refreshing shaders"
+)
+add_dependencies(manifold_shaders manifold)

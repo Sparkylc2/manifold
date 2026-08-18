@@ -1,6 +1,9 @@
 #pragma once
 
+#include <manifold/ai/archive.h>
 #include <manifold/ai/reduced_model.h>
+
+#include <string>
 
 namespace manifold::AI {
 using namespace Eigen;
@@ -8,6 +11,14 @@ using namespace Eigen;
 class POD : public ReducedModel {
   public:
     void compute(const MatrixXd &X);
+
+    // Checkpoint the basis. Saves only the first `rank` modes -- the full U is
+    // one column per snapshot, which for a fluid window is hundreds of
+    // megabytes and none of it is used once the rank is chosen. The temporal
+    // coefficients are not saved either; they only exist to fit against.
+    void serialize(Archive &ar);
+    void save(const std::string &path);
+    void load(const std::string &path);
 
     // rebuilds x from its projection onto the first r modes
     VectorXd reconstruct(const VectorXd &x, int r) const;

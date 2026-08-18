@@ -86,6 +86,11 @@ class LayeredRenderer : public Renderer {
     void draw_shaded(unsigned int shader, const Vertex2D *v, int count,
                      Blend blend) override;
 
+    // both land in the same bucket as the draws they wrap, so replay keeps
+    // them paired and in order
+    void begin_offscreen() override;
+    void end_offscreen(unsigned int shader, Blend blend) override;
+
     // --- pass-through ---
 
     bool init(const RendererConfig &cfg) override;
@@ -135,7 +140,9 @@ class LayeredRenderer : public Renderer {
         SmoothScreenLine,
         ScreenRect,
         TexQuad,
-        Shaded
+        Shaded,
+        BeginOffscreen,
+        EndOffscreen
     };
 
     struct Cmd {

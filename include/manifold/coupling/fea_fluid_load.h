@@ -86,6 +86,14 @@ class FeaFluidLoad {
         m_primed = true;
     }
 
+    // re-adds the load update() last applied, without resampling the fluid.
+    // the structure may need several steps per fluid step to stay inside its
+    // own stability limit, and each one clears the load accumulator first
+    void reapply() {
+        for (size_t i = 0; i < m_prev.size(); i++)
+            m_body->add_nodal_force((int)i, m_prev[i]);
+    }
+
   private:
     // omega_k = -omega_{k-1} * <r_{k-1}, dr> / <dr, dr>,  dr = r_k - r_{k-1}
     double aitken_omega(int nn) {

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <iostream>
 #include <manifold/coupling/fea_body_boundary.h>
 #include <manifold/coupling/fea_fluid_load.h>
 #include <manifold/coupling/fea_spring_force.h>
@@ -14,6 +15,7 @@
 #include <manifold/renderer/interpolation.h>
 #include <manifold/renderer/plot_widget.h>
 
+#include "manifold/fluid/particle_tracers.h"
 #include "manifold/renderer/theme.h"
 
 #include <algorithm>
@@ -29,47 +31,69 @@ class FeaFlutterDemo : public DemoBase {
     // grid refinement. cell count goes up and cell size goes down together, so
     // COLS*CELL and ROWS*CELL are invariant: the flow occupies the same 9.60 x
     // 4.80 of world, and every slot number tuned against it still holds
-    static constexpr double RES_SCALE = 1.0;
-    static constexpr int COLS = (int)(160 * RES_SCALE);
+    static constexpr double RES_SCALE = 1.5;
+    static constexpr double ALPHA_PADDING_DIST = 0.85 * RES_SCALE;
+    static constexpr int COLS = (int)(210 * RES_SCALE);
     static constexpr int ROWS = (int)(80 * RES_SCALE);
     static constexpr double CELL = 0.06 / RES_SCALE;
     static constexpr int SS = 2;
 
     static constexpr double INFLOW = 3.0;
+    static constexpr double W = COLS * CELL; // solver-space extents
+    static constexpr double H = ROWS * CELL;
 
     // beam. rho is high on purpose: a metal plate in air is ~1e3-1e4 denser
     // than the fluid, and the mass ratio is what keeps the staggered coupling
     // stable
     static constexpr double BEAM_W = 0.30;
     static constexpr double BEAM_H = 2.00;
-    static constexpr double E_MOD = 60000.0;
-    static constexpr double RHO_S = 800.0;
-    static constexpr double DAMP_A = 0.08;
-    static constexpr int NW = 2;  // cells across the width
-    static constexpr int NH = 20; // cells along the height
+    static constexpr double E_MOD = 200000.0;
+    static constexpr double RHO_S = 1000.0;
+    static constexpr double DAMP_A = 0.1;
+    // NW must stay even: the boundary chain and the tip probe take i = NW/2 as
+    // the centreline
+    static constexpr int NW = 12; // cells across the width
+    static constexpr int NH = 30; // cells along the height
 
     static constexpr double CYL_R = 0.22; // upstream cylinder, Wake mode
-    static constexpr int SUBSTEPS = 1;
 
-    static constexpr double VM_MAX = 450.0;  // von Mises colour ceiling
-                                             // (nodal-averaged, lower than raw)
-    static constexpr double VM_SMOOTH = 0.2; // temporal ema for the stress map
+    // von Mises colour ceilings, set to the p99 of the nodal-averaged stress
+    // each mode actually reaches -- the ramp spans the data instead of
+    // saturating a third of the way in
+    static constexpr double VM_MAX = 1700.0;
+    // temporal ema for the stress map. this, not a dead band in the ramp, is
+    // what keeps low-stress nodes from shimmering
+    static constexpr double VM_SMOOTH = 0.10;
     static constexpr int FADE_PX = 16;
 
-    static constexpr double RELAX_TWOWAY = 0.25;
+    static constexpr double RELAX_TWOWAY = 0.1;
 
     static constexpr double SPR_BASE_X = 3.00, SPR_BASE_Y = 2.60;
     static constexpr int J_LOW = NH / 3, J_HIGH = 2 * NH / 3;
-    static constexpr double SPR_K = 1000.0, SPR_C = 40.0;
+    static constexpr double SPR_K = 1000, SPR_C = 0;
+    // Friction on the vertical rail, per mount. The plate weighs
+    // RHO_S*BEAM_W*BEAM_H = 600 and both mounts drag on it, so its plunge
+    // velocity decays with tau = m/(2*c) -- about 1.5 s here. Enough to stop a
+    // net cross-load walking the mount off the rail, loose enough that the
+    // shedding still moves it.
+    static constexpr double SPR_SLIDE_C = 200.0;
+    // world height of each mount pad. k and c are applied explicitly, so a
+    // point mount's step limit scales with the nodal mass and vanishes as the
+    // mesh is refined; a fixed-size pad keeps it mesh-independent
+    static constexpr double SPR_FOOT = 0.20;
     static constexpr double RELAX_SPRINGS = 0.01;
     static constexpr double SPR_LOAD_SCALE = 30.0;
     static constexpr double SPR_ANCHOR_X = 0.35;
 
     static constexpr double LABEL_PAD_Y = 0.55; // clears the edge fade
     static constexpr int LABEL_SIZE = 15;
-    static constexpr double VM_MAX_SPRINGS = 9000.0;
+    static constexpr double VM_MAX_SPRINGS = 8000.0;
 
     enum class Drive { TwoWay, Wake, Springs };
+
+    static constexpr double TRACER_W = 0.085;
+    static constexpr double TRACER_MAX_LEN = 0.5;
+    static constexpr int TRACERS = 500;
 
     void set_drive(Drive d) { m_drive = d; }
     Drive drive() const { return m_drive; }
@@ -84,10 +108,26 @@ class FeaFlutterDemo : public DemoBase {
         m_mac.set_channel(INFLOW);
         // U/h already puts this near CFL 1, so at 2 the split only engages
         // where the flow locally accelerates rather than every frame
-        m_mac.set_cfl(2.0, 2);
 
         m_mac.set_smoke(true);
+
         m_fluid = active_fluid();
+
+        // seed and cull against the actual grid. the +-5 default straddles a
+        // channel that runs x +-9.07, y +-3.44, so a third of the tracers land
+        // outside the fluid where velocity_at clamps and never convect
+        {
+            const Vector2d o = m_fluid->origin();
+            const Vector2d span(COLS * CELL, ROWS * CELL);
+
+            double b = 1;
+            m_tracer_system.position_min = o + Vector2d(b, 0.0);
+            m_tracer_system.position_max = o + span;
+            m_tracer_system.min_bound = o - Vector2d(b, 0.0);
+            m_tracer_system.max_bound = o + span;
+        }
+        // reads position_min/max to build its distributions, so it goes last
+        m_tracer_system.init(m_fluid, TRACERS, 0);
 
         build_beam();
 
@@ -111,6 +151,7 @@ class FeaFlutterDemo : public DemoBase {
     }
 
     void process(double dt) override {
+        dt = 1.0 / 60;
         m_t += dt;
 
         m_fluid->clear_sources();
@@ -136,11 +177,24 @@ class FeaFlutterDemo : public DemoBase {
 
         m_fluid->advance(dt);
         m_load->update();
-        if (m_drive == Drive::Springs) {
-            m_spring_low.update();
-            m_spring_high.update();
+
+        // the fluid load and the spring mounts are both explicit, so the
+        // structure has to stay inside its own step limit even when the frame
+        // is slow. the fluid keeps the full dt -- only the cheap side
+        // subdivides
+        m_substeps = m_body->substeps_for(dt);
+        const double sub_dt = dt / m_substeps;
+        for (int k = 0; k < m_substeps; k++) {
+            if (k) {
+                m_body->clear_loads();
+                m_load->reapply();
+            }
+            if (m_drive == Drive::Springs) {
+                m_spring_low.update();
+                m_spring_high.update();
+            }
+            m_body->advance(sub_dt);
         }
-        m_body->advance(dt);
 
         const Vector2d tip = m_body->node_position(m_tip);
         m_tip_dx = tip.x() - m_rest_tip.x();
@@ -151,9 +205,12 @@ class FeaFlutterDemo : public DemoBase {
         m_vm_peak = 0.0;
         for (int e = 0; e < m_body->element_count(); e++)
             m_vm_peak = std::max(m_vm_peak, m_body->von_mises(e));
+
+        m_tracer_system.update(dt);
     }
 
     void render(Rendering::Renderer *r) override {
+
         draw_grid(r);
         render_cell(r);
         render_hud(r);
@@ -161,6 +218,11 @@ class FeaFlutterDemo : public DemoBase {
     }
 
     void render_cell(Rendering::Renderer *r) override {
+        if (!m_tracer_shader)
+            m_tracer_shader = r->load_shader("assets/shaders/tracer.fs");
+        if (!m_merge_shader)
+            m_merge_shader = r->load_shader("assets/shaders/metaball.fs");
+
         if (!m_field_ready) {
             m_field.init(COLS, ROWS,
                          {.supersample = SS,
@@ -177,23 +239,46 @@ class FeaFlutterDemo : public DemoBase {
         m_field.render(
             r, o.x(), o.y(), CELL,
             [this, vmax](double wx, double wy, double &val, double &a) {
+                const Vector2d p(wx, wy);
                 Vector2d vel;
-                m_fluid->velocity_at(Vector2d(wx, wy), &vel,
-                                     Fluid::Interp::Cubic);
+                m_fluid->velocity_at(p, &vel, Fluid::Interp::Cubic);
                 val = vel.norm() / vmax;
+
                 const double pert = std::hypot(vel.x() - INFLOW, vel.y());
                 const double pa = std::clamp(pert / (0.6 * INFLOW), 0.0, 1.0);
                 const double dye = std::clamp(
-                    m_fluid->density_at(Vector2d(wx, wy), Fluid::Interp::Cubic),
-                    0.0, 1.0);
+                    m_fluid->density_at(p, Fluid::Interp::Cubic), 0.0, 1.0);
                 a = std::max(pa, dye);
+                a = get_alpha(p, a);
             });
-
         if (m_drive == Drive::Wake)
             r->draw_circle(m_cyl_c.x(), m_cyl_c.y(), CYL_R,
                            Rendering::palette::foreground());
         if (m_drive == Drive::Springs)
             draw_supports(r);
+
+        // additive is a glow: it can only push toward white, so on a light
+        // theme the trail composites to background and vanishes. this one was
+        // drawing terracotta onto sand and clamping to (255,255,255)
+        const bool dark = Rendering::palette::background().r < 128;
+
+        std::vector<Rendering::Vertex2D> mesh;
+        m_tracer_system.build_mesh(mesh, TRACER_W, TRACER_MAX_LEN,
+                                   Rendering::palette::background());
+
+        // tracer.fs emits premultiplied alpha; it has to be resolved through
+        // the merge pass or the blend applies alpha twice and the blobs go grey
+        const auto blend =
+            dark ? Rendering::Blend::Additive : Rendering::Blend::Alpha;
+        if (!mesh.empty() && m_merge_shader) {
+            r->begin_offscreen();
+            r->draw_shaded(m_tracer_shader, mesh.data(), (int)mesh.size(),
+                           blend);
+            r->end_offscreen(m_merge_shader, blend);
+        } else {
+            r->draw_shaded(mesh.empty() ? 0 : m_tracer_shader, mesh.data(),
+                           (int)mesh.size(), blend);
+        }
 
         draw_beam(r);
         draw_speed_label(r);
@@ -226,8 +311,9 @@ class FeaFlutterDemo : public DemoBase {
                  drive_name(), m_use_mac ? "MAC" : "Stam");
         hud.line(Rendering::palette::text(), "BC: %s",
                  m_solid_bc ? "solid-project (sealed)" : "penalization (soft)");
-        hud.line(Rendering::palette::text(), "E: %.0f   rho_s: %.0f   U: %.1f",
-                 E_MOD, RHO_S, INFLOW);
+        hud.line(Rendering::palette::text(),
+                 "E: %.0f   rho_s: %.0f   U: %.1f   fea x%d", E_MOD, RHO_S,
+                 INFLOW, m_substeps);
         hud.separator();
         hud.small_text("[Left/Right] drive  [M] solver  [P] BC  [R] reset",
                        Rendering::palette::text_dim());
@@ -376,11 +462,36 @@ class FeaFlutterDemo : public DemoBase {
         if (spr) {
             m_node_low = id(0, J_LOW);
             m_node_high = id(0, J_HIGH);
+
+            // the pad spans SPR_FOOT of the upstream face, centred on the
+            // nominal mount node. interior nodes of a uniform column all carry
+            // the same tributary mass, so equal weights are the mass shares
+            auto pad = [&](int j_centre) {
+                const double yc = y0 + BEAM_H * j_centre / NH;
+                std::vector<int> ns;
+                for (int j = 0; j <= NH; j++)
+                    if (std::abs(y0 + BEAM_H * j / NH - yc) <= 0.5 * SPR_FOOT)
+                        ns.push_back(id(0, j));
+                return ns;
+            };
+
             m_spring_low = Coupling::FeaSpringForce(
                 mesh.rest(m_node_low), m_body.get(), m_node_low, SPR_K, SPR_C);
             m_spring_high =
                 Coupling::FeaSpringForce(mesh.rest(m_node_high), m_body.get(),
                                          m_node_high, SPR_K, SPR_C);
+            for (auto *s : {&m_spring_low, &m_spring_high}) {
+                const std::vector<int> ns =
+                    pad(s == &m_spring_low ? J_LOW : J_HIGH);
+                s->set_footprint(ns, std::vector<double>(ns.size(), 1.0));
+                // Streamwise only, so the mounts slide up and down their rail.
+                // draw_supports() has always drawn these as a horizontal
+                // spring off a vertical wall with the attachment tracking the
+                // node's current y -- a roller. Springing both axes pinned the
+                // plate to its rest height and contradicted that picture.
+                s->set_axis(Vector2d::UnitX());
+                s->set_rail_friction(SPR_SLIDE_C);
+            }
         } else {
             for (int i = 0; i <= NW; i++)
                 m_body->set_fixed_node(id(i, 0), mesh.rest(id(i, 0)));
@@ -398,92 +509,56 @@ class FeaFlutterDemo : public DemoBase {
 
     // ---- beam stress ramp ----
     //
-    // Base -> one saturated hue, lerped in Oklab. Both ends have to stay clear
-    // of accent1-4, which already colour the fluid the beam sits in; that
-    // clash is what made the original ramp unreadable. Measured in Oklab,
-    // against the current text_dim base:
+    // Diverging map: compression hue <- base -> tension hue, lerped in Oklab
+    // and signed by hydrostatic stress. The neutral axis has to read as a
+    // smooth pass-through, so the response is monotone with no dead band -- an
+    // uncoloured plateau there shows up as a hard stripe with saturated colour
+    // on both sides, which is what the stops-and-dead-band version did.
     //
-    //            travel from base   nearest accent
-    //   wine       0.112              0.112 (accent1 terracotta)
-    //   moss       0.332              0.204 (accent4)      <- best on both
-    //   straw      0.165              0.049 (accent3 ochre)
+    // The two hues carry equal weight only if they sit the same Oklab distance
+    // from the base (espresso #3A3028). Measured travel, and clearance to the
+    // accents that already colour the fluid:
     //
-    // Stops, low -> high, lerped in Oklab between neighbours. Green for the
-    // working range, yellow as it loads, red held back for genuinely high
-    // stress. Edit both arrays together in stress_colour() to add or move a
-    // stop; a single-hue ramp is just two entries.
+    //                    travel   nearest accent
+    //   straw  D4B24A     0.470     0.072 (accent3 ochre)
+    //   fern   4E8C3A     0.292     0.093 (accent2 sage)   <- 1.6x too weak
+    //   apple  76C244     0.455     0.149 (accent2 sage)   <- matches straw
     //
-    // The green has to clear accent2 (dusty sage), which the fluid ramp uses.
-    // Fern sits 0.093 from it -- about the same margin the wine red has from
-    // accent1, which already reads fine. A darker moss would be safer (0.208)
-    // but travels only 0.144 from this dark base, and that flat dark low end is
-    // exactly what was wrong before.
-    //
-    // Lightness runs 0.318 -> 0.579 -> 0.774 -> 0.460, so it brightens into the
-    // yellow then drops into the red: peak stress reads as more saturated
-    // rather than brighter, which is what makes the red stand out as a warning
-    // rather than just as "more".
+    // Anything green reaching straw's 0.470 goes neon, so apple is as close as
+    // the palette allows. Temporal noise is VM_SMOOTH's job, not the ramp's.
+    static constexpr double STRESS_GAMMA = 1.0;
+    // The neutral end cannot be the bare foreground. Espresso sits at Oklab
+    // L = 0.32 while both hues are up near L = 0.72, so as stress fell to zero
+    // lightness and chroma collapsed together and the neutral axis came out a
+    // black crater -- L dropped 0.16 in a single column -- rather than a
+    // desaturated line. No gamma or toe fixes that, because the darkness is in
+    // the endpoint, not the response. Lifting the neutral toward shadow holds
+    // lightness roughly flat across the axis, so the pivot reads as a loss of
+    // saturation with a gradient running into it. Raise it to brighten the
+    // beam's interior, lower it toward 0 to go back to the dark base
+    static constexpr double STRESS_NEUTRAL_LIFT = 0.0;
 
-    // Sensitivity. t is vm/vm_max, which left most of the beam sitting in the
-    // dark end. The old smoothstep flattened BOTH ends, squashing the mid-range
-    // it needed to show (t=0.2 came out at 0.10). Now a short toe kills the
-    // tip flicker and a gamma below 1 lifts everything above it: t=0.2 lands at
-    // 0.38, roughly 3.6x more colour over the working range.
-    static constexpr double STRESS_TOE = 0.06;
-    static constexpr double STRESS_GAMMA = 0.40;
-    // Dead band. Stress below this fraction of vm_max stays at bare base, and
-    // the ramp is stretched over what is left. This is the knob for HOW MUCH of
-    // the beam carries colour; GAMMA is how fast it climbs once past the band.
-    // The two pull against each other -- GAMMA at 0.40 lifts hard, so without a
-    // band most of the beam sits in the yellow. Raise MIN to push yellow back
-    // toward the root, lower it to spread colour further out to the tip.
-    static constexpr double STRESS_MIN = 0.15;
-    // Where the last stop before red sits, so red starts blending in from here
-    // upward. Lower = red appears further down the beam. Was 0.45; at 0.36 a
-    // mid-load element carries roughly twice the red it did.
-    static constexpr double STRESS_RED_AT = 0.36;
-
-    // TO SWITCH BASE: same, exactly one stress_lo() live. Leaving both
-    // uncommented is a redefinition error, which is the point -- it cannot
-    // silently end up in a half-changed state.
-    static Rendering::Color stress_lo() {
-        return Rendering::palette::foreground();
-        // return Rendering::palette::text_dim();
-    }
-    // darker palette base. straw yellow needs this one; moss green does NOT
-    // (its travel collapses 0.332 -> 0.099 against a dark base)
-    // static Rendering::Color stress_lo() {
-    //     return Rendering::palette::foreground();
-    // }
-
-    static Rendering::Color stress_colour(double t) {
-        t = std::clamp(t, 0.0, 1.0);
-        static const Rendering::Color col[] = {
-            stress_lo(), // dark base
-            stress_lo(), // dark base
-            // Rendering::Color::hex(0x4E8C3AFF),  // fern green
-            Rendering::Color::hex(0xD4B24AFF), // straw yellow
-            Rendering::Color::hex(0x8C3A3AFF), // wine red
-        };
-
-        // todo: we will need to edit this later when doing the high res ones
-        // just to make sure the colouring looks nice
-        static constexpr double at[] = {0.00, 0.28, STRESS_RED_AT, 1.00};
-        constexpr int n = (int)(sizeof(at) / sizeof(at[0]));
-
-        for (int i = 0; i + 1 < n; i++)
-            if (t <= at[i + 1])
-                return Rendering::color_lerp_oklab(
-                    col[i], col[i + 1], (t - at[i]) / (at[i + 1] - at[i]));
-        return col[n - 1];
+    static Rendering::Color stress_neutral() {
+        return Rendering::color_lerp_oklab(Rendering::palette::foreground(),
+                                           Rendering::palette::shadow(),
+                                           STRESS_NEUTRAL_LIFT);
     }
 
-    // toe: flat slope near zero so the unloaded tip does not flicker.
-    // gamma: lifts everything above it into the visible part of the ramp
-    static double stress_response(double t) {
-        t = std::clamp((t - STRESS_MIN) / (1.0 - STRESS_MIN), 0.0, 1.0);
-        const double toe = std::clamp(t / STRESS_TOE, 0.0, 1.0);
-        return std::pow(t, STRESS_GAMMA) * (toe * toe * (3.0 - 2.0 * toe));
+    // r is the post-response magnitude; sign picks the hue
+    static Rendering::Color stress_colour(double r, bool tension) {
+        const Rendering::Color hue =
+            tension ? Rendering::Color::hex(0xFF7043FF)  // tomato red
+                    : Rendering::Color::hex(0x76C244FF); // apple green
+        return Rendering::color_lerp_oklab(stress_neutral(), hue,
+                                           std::clamp(r, 0.0, 1.0));
+    }
+
+    // gamma below 1 lifts the mid-range; it also sets how wide the desaturated
+    // band at the neutral axis reads. no toe -- crushing the response near zero
+    // is what put a flat hole at the axis, and VM_SMOOTH already handles the
+    // frame-to-frame wobble that the toe was there to hide
+    static double stress_response(double m) {
+        return std::pow(std::clamp(m, 0.0, 1.0), STRESS_GAMMA);
     }
 
     void draw_supports(Rendering::Renderer *r) {
@@ -503,7 +578,7 @@ class FeaFlutterDemo : public DemoBase {
         m_nodal_vm.assign(nn, 0.0);
         m_nodal_cnt.assign(nn, 0.0);
         for (int e = 0; e < m_body->element_count(); e++) {
-            const double vm = m_body->von_mises(e);
+            const double vm = m_body->von_mises_signed(e);
             const FEA::Tri &t = mesh.tri(e);
             for (int k = 0; k < 3; k++) {
                 m_nodal_vm[t.n[k]] += vm;
@@ -527,8 +602,10 @@ class FeaFlutterDemo : public DemoBase {
 
         const double vm_max =
             m_drive == Drive::Springs ? VM_MAX_SPRINGS : VM_MAX;
+        // magnitude drives the ramp; sign picks the mid hue (yellow/green)
         auto colour = [&](double vm) {
-            return stress_colour(stress_response(vm / vm_max));
+            return stress_colour(stress_response(std::abs(vm) / vm_max),
+                                 vm >= 0.0);
         };
 
         // one gouraud triangle per element. adjacent elements share edge nodes
@@ -544,12 +621,37 @@ class FeaFlutterDemo : public DemoBase {
                 colour(m_nodal_smooth[t.n[2]]));
         }
     }
+
+    double get_alpha(const Vector2d &pos, const double a) {
+        const Vector2d o = m_fluid->origin();
+        const Vector2d max = {o.x() + W, o.y() + H};
+
+        // distance to the nearest edge on each axis
+        const double dx = std::min(pos.x() - o.x(), max.x() - pos.x());
+        const double dy = std::min(pos.y() - o.y(), max.y() - pos.y());
+
+        // 0 at the edge, ramps to 1 once we're a full pad deep.
+        // smootherstep, not pow(t, 1.5): that one still had slope 1.4 arriving
+        // at t = 1 and 0 just past it, and the eye reads a slope break as a
+        // line. this channel is tinted right out to the walls, so there is no
+        // texture to hide it behind. zero 1st AND 2nd derivative at both ends
+        auto fade = [](double t) {
+            t = std::clamp(t, 0.0, 1.0);
+            return t * t * t * (t * (6.0 * t - 15.0) + 10.0);
+        };
+        const double fx = fade(dx / ALPHA_PADDING_DIST);
+        const double fy = fade(dy / ALPHA_PADDING_DIST);
+        return std::clamp(fx * fy * a, 0.0, 1.0);
+    }
+
+    Vector2d to_solver(double wx, double wy) const { return Vector2d(wx, wy); }
+
     Fluid::StableFluidSolver m_stam{ROWS,   COLS, CELL,
                                     1.0e-6, 0.0,  Vector2d::Zero()};
     Fluid::MACFluidSolver m_mac{ROWS,   COLS, CELL,
                                 1.0e-6, 0.0,  Vector2d::Zero()};
     Fluid::FluidSolver *m_fluid = nullptr;
-    bool m_use_mac = true; // cut-cell MAC; [M] still drops back to Stam
+    bool m_use_mac = false; // cut-cell MAC; [M] still drops back to Stam
     bool m_solid_bc = true;
 
     std::unique_ptr<FEA::ElasticBody> m_body;
@@ -567,6 +669,7 @@ class FeaFlutterDemo : public DemoBase {
     Vector2d m_rest_tip = Vector2d::Zero();
     Vector2d m_cyl_c = Vector2d::Zero();
 
+    int m_substeps = 1;
     double m_tip_dx = 0.0;
     double m_vm_peak = 0.0;
     double m_t = 0.0;
@@ -575,6 +678,10 @@ class FeaFlutterDemo : public DemoBase {
     std::vector<double> m_nodal_cnt;
     std::vector<double> m_nodal_smooth;
     bool m_vm_primed = false;
+
+    unsigned int m_tracer_shader = 0;
+    unsigned int m_merge_shader = 0;
+    Fluid::TracerSystem m_tracer_system;
 
     Rendering::FieldView m_field;
     bool m_field_ready = false;

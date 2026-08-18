@@ -85,6 +85,9 @@ class RaylibRenderer : public Renderer {
     void draw_shaded(unsigned int shader, const Vertex2D *v, int count,
                      Blend blend) override;
 
+    void begin_offscreen() override;
+    void end_offscreen(unsigned int shader, Blend blend) override;
+
     int measure_text(const std::string &text, int font_size) override;
     unsigned int load_shader(const std::string &fs) override;
 
@@ -112,11 +115,39 @@ class RaylibRenderer : public Renderer {
     int screen_height() const override;
     float delta_time() const override;
 
-    // --- offscreen frame recording ---
+    // --- video recording (screen framebuffer -> ffmpeg) ---
     bool begin_recording(const std::string &path, int fps, int crop_x = 0,
                          int crop_y = 0, int crop_w = 0, int crop_h = 0);
     void end_recording();
-    bool is_recording() const override { return m_recording; }
+    bool is_video_recording() const { return m_recording; }
+
+    // --- PNG sequence capture (own render target, any resolution) ---
+    //
+    // The frame is drawn into a buffer sized from `out_height` rather than
+    // from the window, so the output resolution stops being whatever the
+    // display happens to be. Layout is untouched: everything still draws in
+    // logical screen coordinates and a camera scales those onto the buffer, so
+    // text, HUD and line weights keep exactly the proportions they have on
+    // screen -- there are just more pixels under them.
+    //
+    // `crop_*` is in LOGICAL screen px (0 = whole window) and `out_height` is
+    // the height that crop becomes, so a 9:16 strip out of a 720-tall window
+    // at out_height 1920 lands at 1080x1920.
+    //
+    // `ssaa` draws at that multiple and resolves back down on the GPU, which
+    // is what antialiases the hairline tracers. 2 is a good default; 1 is
+    // roughly twice as fast per frame.
+    bool begin_capture(const std::string &dir, int out_height, int ssaa = 2,
+                       int crop_x = 0, int crop_y = 0, int crop_w = 0,
+                       int crop_h = 0);
+    void end_capture();
+    bool is_capturing() const { return m_capturing; }
+    int captured_frames() const { return m_cap_frame; }
+
+    // true whenever frames are being written anywhere, video or stills: the
+    // signal for "hide the on-screen furniture", which is all callers use it
+    // for
+    bool is_recording() const override { return m_recording || m_capturing; }
 
   private:
     // ---- coordinate transforms ----
@@ -132,6 +163,10 @@ class RaylibRenderer : public Renderer {
     // ---- anti-aliased line via vertex alpha quads ----
     void draw_aa_line(float x0, float y0, float x1, float y1, float thickness,
                       Color color);
+
+    // ---- asset lookup ----
+    // cwd first, then next to the executable, so the binary runs from anywhere
+    static std::string resolve_asset(const std::string &rel);
 
     // ---- font loading ----
 
@@ -153,6 +188,14 @@ class RaylibRenderer : public Renderer {
     // ---- recording ----
     void capture_frame();
 
+    // ---- PNG capture ----
+    void bind_capture(bool clear);
+    void unbind_capture();
+    void write_capture_frame();
+
+    // logical screen px -> the pixels of whichever render target is bound
+    Camera2D target_camera() const;
+
     // ---- state ----
     double m_cam_x, m_cam_y, m_zoom;
 
@@ -173,8 +216,10 @@ class RaylibRenderer : public Renderer {
     Shader m_smooth_line_shader = {};
     bool m_smooth_line_shader_loaded = false;
 
-    // shaders
+    // shaders, plus a path->id cache so a failed lookup is not retried (and
+    // re-warned) on every frame by callers that poll on a 0 handle
     std::unordered_map<unsigned int, Shader> m_shaders;
+    std::unordered_map<std::string, unsigned int> m_shader_by_path;
 
     // recording
     bool m_recording = false;
@@ -182,6 +227,21 @@ class RaylibRenderer : public Renderer {
     int m_rec_w = 0, m_rec_h = 0;   // output (cropped) frame size
     int m_crop_x = 0, m_crop_y = 0; // crop origin in framebuffer px
     int m_fb_w = 0, m_fb_h = 0;     // full framebuffer size at rec start
+
+    // PNG capture
+    bool m_capturing = false;
+    std::string m_cap_dir;
+    RenderTexture2D m_cap_rt = {};  // drawn here, at ssaa resolution
+    RenderTexture2D m_cap_out = {}; // resolved down to here, then read back
+    Camera2D m_cap_cam = {};
+    Rectangle m_cap_crop = {}; // the captured region, in logical screen px
+    int m_cap_ssaa = 1;
+    int m_cap_frame = 0;
+
+    // offscreen merge group
+    RenderTexture2D m_off_rt = {};
+    int m_off_w = 0, m_off_h = 0;
+    bool m_in_offscreen = false;
 };
 
 } // namespace manifold::Rendering

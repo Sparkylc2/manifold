@@ -21,7 +21,7 @@ class MACFluidSolver : public FluidSolver {
                    double visc, double diff,
                    Vector2d grid_origin = Vector2d::Zero())
         : m_nx(grid_cols), m_ny(grid_rows), m_h(cell_size),
-          m_origin(grid_origin), m_visc(visc) {
+          m_origin(grid_origin) {
 
         assert(grid_rows > 1 && grid_cols > 1 &&
                "ensure grid rows and grid cols are greater than 1");
@@ -70,40 +70,13 @@ class MACFluidSolver : public FluidSolver {
         m_usol.resize(m_nx + 1, m_ny);
         m_vsol.resize(m_nx, m_ny + 1);
 
-        // cut cells: solid sdf at grid nodes, fluid area fraction per face
-        m_phi.resize(m_nx + 1, m_ny + 1);
-        m_wu.resize(m_nx + 1, m_ny);
-        m_wv.resize(m_nx, m_ny + 1);
-        m_lvl_u.resize(m_nx + 1, m_ny);
-        m_lvl_v.resize(m_nx, m_ny + 1);
-        m_phi.fill(1e30);
-        m_wu.fill(1.0);
-        m_wv.fill(1.0);
-
-        // maccormack forward/backward targets, one pair per staggering
-        m_mc_ua.resize(m_nx + 1, m_ny);
-        m_mc_ub.resize(m_nx + 1, m_ny);
-        m_mc_va.resize(m_nx, m_ny + 1);
-        m_mc_vb.resize(m_nx, m_ny + 1);
-        m_mc_ca.resize(m_nx, m_ny);
-        m_mc_cb.resize(m_nx, m_ny);
-
         m_dens_src.resize(m_nx, m_ny); // per-frame dye injection buffer
         m_T_src.resize(m_nx, m_ny);    // per-frame heat injection buffer
     }
 
-    // MacCormack only beats plain semi-Lagrangian while the backtrace stays
-    // inside a cell or so; past that the limiter clamps every sample and the
-    // scheme degrades back to first order. so the frame is split to hold CFL
-    void advance(double dt) override {
-        const int n = substep_count(dt);
-        for (int s = 0; s < n; s++)
-            step(dt / n);
-    }
-
     // optional smoke body forces, advection, no-slip on the bodies,
     // then projection. smoke/temperature addition through set_smoke
-    void step(double dt) {
+    void advance(double dt) override {
         if (m_smoke) {
             add_buoyancy(dt);          // eq. 5.1
             vorticity_confinement(dt); // eq. 5.1
@@ -122,15 +95,14 @@ class MACFluidSolver : public FluidSolver {
             m_T_prev = m_T;
         }
 
-        advect_mc(m_u_tmp, m_u_prev, m_mc_ua, m_mc_ub, 1, 0, dt);
-        advect_mc(m_v_tmp, m_v_prev, m_mc_va, m_mc_vb, 0, 1, dt);
+        advect(m_u_tmp, m_u_prev, m_u, m_v, 1, 0, dt, Interp::Linear);
+        advect(m_v_tmp, m_v_prev, m_u, m_v, 0, 1, dt, Interp::Linear);
         m_u.swap(m_u_tmp);
         m_v.swap(m_v_tmp);
-        apply_velocity_bc();
 
         if (m_smoke) {
-            advect_mc(m_dens, m_dens_prev, m_mc_ca, m_mc_cb, 0, 0, dt);
-            advect_mc(m_T, m_T_prev, m_mc_ca, m_mc_cb, 0, 0, dt);
+            advect(m_dens, m_dens_prev, m_u, m_v, 0, 0, dt, Interp::Cubic);
+            advect(m_T, m_T_prev, m_u, m_v, 0, 0, dt, Interp::Cubic);
 
             if (m_dens_dissipation > 0.0) {
                 const double s = 1.0 / (1.0 + dt * m_dens_dissipation);
@@ -144,61 +116,9 @@ class MACFluidSolver : public FluidSolver {
             }
         }
 
-        diffuse_velocity(dt);
         rebuild_solid();
-
-        reset_body_loads();
-        if (m_no_slip) {
-            penalize(dt); // shear only; the normal block is the projection
-        }
-        project(dt); // projection restores incompressibility (chapter 4)
-        accumulate_pressure_load();
-
-        // last, so the loads above are read off the sealed field and the next
-        // step's backtraces still find something physical inside the body
-        extrapolate_into_solid();
-    }
-
-    // fluid substeps per advance. 0 disables, which is the old one-step-a-frame
-    // behaviour
-    void set_cfl(double cfl, int max_substeps = 8) {
-        m_cfl = cfl;
-        m_max_substeps = max_substeps;
-    }
-
-    // divergence left in the field, relative to what the step started with.
-    // the pressure solve is ~85% of a step, so this is the main quality/cost
-    // dial after resolution
-    void set_pressure_tolerance(double tol) { m_ptol = tol; }
-
-    // Volume penalization, off by default.
-    //
-    // The cut-cell projection owns the wall condition now, so this only adds a
-    // tangential no-slip -- and below roughly 80 cells of chord it costs more
-    // than it buys. It drives the faces the surface cuts to the body's own
-    // velocity, so a moving body drags a pocket of its own velocity around and
-    // releases it as a body-shaped wake that nothing here diffuses away.
-    // Measured on a plunging foil: mean speed in the strip just vacated was
-    // 8.6 against a 10.0 freestream with it on, 11.0 with it off, and Cl went
-    // 0.27 -> 0.67 for losing it.
-    //
-    // Worth turning on once the grid can carry a real boundary layer, where the
-    // extra wall vorticity is physics rather than a one-cell artefact.
-    void set_no_slip(bool on) { m_no_slip = on; }
-    void set_permeability(double eta) { m_eta = eta; }
-
-    int substep_count(double dt) const {
-        if (m_cfl <= 0.0)
-            return 1;
-
-        double umax = 1e-9;
-        for (size_t k = 0; k < m_u.size(); k++)
-            umax = std::max(umax, std::abs(m_u[k]));
-        for (size_t k = 0; k < m_v.size(); k++)
-            umax = std::max(umax, std::abs(m_v[k]));
-
-        const int n = (int)std::ceil(umax * dt / (m_cfl * m_h));
-        return std::clamp(n, 1, m_max_substeps);
+        penalize(dt); // drive the velocity around bodies (no-slip)
+        project(dt);  // projection restores incompressibility (chapter 4)
     }
 
     // solids couple in through volume penalization
@@ -224,9 +144,7 @@ class MACFluidSolver : public FluidSolver {
         force->setZero();
         *torque = 0.0;
 
-        // the load arrays are sized by the step, so a boundary registered since
-        // the last one has no entry yet
-        for (size_t k = 0; k < m_body_force.size(); k++) {
+        for (size_t k = 0; k < m_bodies.size(); k++) {
             if (m_bodies[k] != &b) {
                 continue;
             }
@@ -277,31 +195,16 @@ class MACFluidSolver : public FluidSolver {
         return idx;
     }
 
-    // one node-sampled sdf drives everything downstream: the fluid area
-    // fraction of each face (which is what the pressure solve needs to see a
-    // surface that does not lie on a grid line) and its complement as the
-    // penalization mask, so the two no longer disagree about where the body is
-    //
-    // the face is split at its midpoint before taking fractions, which halves
-    // the thickness a feature needs to stay visible -- the aft quarter of an
-    // aerofoil is thinner than a cell and vanishes otherwise
+    // per-face solid fraction chi (~1 inside a body, 0 in fluid) + solid
+    // velocity, this gets unioned over every body
     void rebuild_solid() {
+        m_chi_u.zero();
+        m_chi_v.zero();
         m_usol.zero();
         m_vsol.zero();
 
         if (m_bodies.empty()) {
-            m_phi.fill(1e30);
-            m_wu.fill(1.0);
-            m_wv.fill(1.0);
-            m_chi_u.zero();
-            m_chi_v.zero();
             return;
-        }
-
-        for (size_t j = 0; j <= m_ny; j++) {
-            for (size_t i = 0; i <= m_nx; i++) {
-                m_phi(i, j) = solid_sdf(m_origin + Vector2d(i * m_h, j * m_h));
-            }
         }
 
         for (size_t j = 0; j < m_ny; j++) {
@@ -309,23 +212,14 @@ class MACFluidSolver : public FluidSolver {
 
                 const Vector2d fc =
                     m_origin + Vector2d(i * m_h, (j + 0.5) * m_h);
-                const double pm = solid_sdf(fc);
-                double w =
-                    0.5 * (fluid_fraction(m_phi(i, j), pm) +
-                           fluid_fraction(pm, m_phi(i, j + 1)));
+                const double chi =
+                    std::clamp(0.5 - solid_sdf(fc) / m_h, 0.0, 1.0);
 
-                // a face left with a sliver of fluid contributes a near-empty
-                // row and wrecks the conditioning for no geometric gain
-                if (w < 1e-2) {
-                    w = 0.0;
-                }
-
-                m_wu(i, j) = w;
-                m_chi_u(i, j) = 1.0 - w;
-
-                if (w >= 1.0) {
+                if (chi <= 0.0) {
                     continue;
                 }
+
+                m_chi_u(i, j) = chi;
 
                 Vector2d vs;
                 m_bodies[nearest_body(fc)]->velocity_at(fc, &vs);
@@ -337,21 +231,14 @@ class MACFluidSolver : public FluidSolver {
 
                 const Vector2d fc =
                     m_origin + Vector2d((i + 0.5) * m_h, j * m_h);
-                const double pm = solid_sdf(fc);
-                double w =
-                    0.5 * (fluid_fraction(m_phi(i, j), pm) +
-                           fluid_fraction(pm, m_phi(i + 1, j)));
+                const double chi =
+                    std::clamp(0.5 - solid_sdf(fc) / m_h, 0.0, 1.0);
 
-                if (w < 1e-2) {
-                    w = 0.0;
-                }
-
-                m_wv(i, j) = w;
-                m_chi_v(i, j) = 1.0 - w;
-
-                if (w >= 1.0) {
+                if (chi <= 0.0) {
                     continue;
                 }
+
+                m_chi_v(i, j) = chi;
 
                 Vector2d vs;
                 m_bodies[nearest_body(fc)]->velocity_at(fc, &vs);
@@ -360,85 +247,16 @@ class MACFluidSolver : public FluidSolver {
         }
     }
 
-    // Fills the velocity inside solids from the nearest fluid faces.
-    //
-    // A semi-Lagrangian backtrace routinely lands inside a body, and now that
-    // the body is genuinely sealed the value sitting there is the body's own
-    // velocity. Reading it drags a hole into the flow, and when the body moves
-    // on it releases the whole body-shaped pocket, which then convects
-    // downstream keeping its outline because nothing here diffuses it away.
-    // Extrapolating first means the backtrace reads what the flow around the
-    // surface is doing instead.
-    //
-    // layers only has to cover the furthest a backtrace can reach, which CFL
-    // already bounds to a cell or two
-    void extrapolate_into_solid(int layers = 3) {
-        extrapolate_face(m_u, m_wu, m_lvl_u, layers);
-        extrapolate_face(m_v, m_wv, m_lvl_v, layers);
-    }
-
-    // breadth-first outward sweep. lvl holds the layer a face was filled on, so
-    // taking only strictly-lower neighbours keeps a pass from feeding on itself
-    // and removes the need for a second buffer
-    static void extrapolate_face(Field2D &q, const Field2D &w, Field2D &lvl,
-                                 int layers) {
-        const int W = (int)q.m_W, H = (int)q.m_H;
-
-        for (size_t k = 0; k < q.size(); k++) {
-            lvl[k] = (w[k] > 0.0) ? 0.0 : -1.0;
-        }
-
-        for (int L = 1; L <= layers; L++) {
-            for (int j = 0; j < H; j++) {
-                for (int i = 0; i < W; i++) {
-
-                    if (lvl(i, j) >= 0.0) {
-                        continue;
-                    }
-
-                    double s = 0.0;
-                    int n = 0;
-                    auto take = [&](int a, int b) {
-                        if (a < 0 || a >= W || b < 0 || b >= H) {
-                            return;
-                        }
-                        if (lvl(a, b) >= 0.0 && lvl(a, b) < (double)L) {
-                            s += q(a, b);
-                            n++;
-                        }
-                    };
-
-                    take(i - 1, j);
-                    take(i + 1, j);
-                    take(i, j - 1);
-                    take(i, j + 1);
-
-                    if (n) {
-                        q(i, j) = s / n;
-                        lvl(i, j) = (double)L;
-                    }
-                }
-            }
-        }
-    }
-
-    // fluid area of a cell, taken from the four faces bounding it so it agrees
-    // exactly with what the pressure matrix was assembled from
-    double cell_fluid_fraction(size_t i, size_t j) const {
-        return 0.25 * (m_wu(i, j) + m_wu(i + 1, j) + m_wv(i, j) + m_wv(i, j + 1));
-    }
-
     // drives the velocity toward each body inside its mask (no-slip)
     // stores the momentum removed as the per-body force + torque (about
     // origin)
-    void reset_body_loads() {
-        m_body_force.assign(m_bodies.size(), Vector2d::Zero());
-        m_body_torque.assign(m_bodies.size(), 0.0);
-    }
-
     void penalize(double dt) {
 
-        if (m_bodies.empty()) {
+        const size_t nb = m_bodies.size();
+        m_body_force.assign(nb, Vector2d::Zero());
+        m_body_torque.assign(nb, 0.0);
+
+        if (nb == 0) {
             return;
         }
 
@@ -447,7 +265,7 @@ class MACFluidSolver : public FluidSolver {
             for (size_t i = 0; i <= m_nx; i++) {
 
                 const double chi = m_chi_u(i, j);
-                if (chi <= 0.0 || chi >= 1.0) {
+                if (chi <= 0.0) {
                     continue;
                 }
                 const double inv = 1.0 / (1.0 + dt * chi / m_eta);
@@ -473,7 +291,7 @@ class MACFluidSolver : public FluidSolver {
             for (size_t i = 0; i < m_nx; i++) {
 
                 const double chi = m_chi_v(i, j);
-                if (chi <= 0.0 || chi >= 1.0) {
+                if (chi <= 0.0) {
                     continue;
                 }
 
@@ -497,214 +315,50 @@ class MACFluidSolver : public FluidSolver {
         }
     }
 
-    // F = -int p grad(chi_fluid), the surface integral written over the smeared
-    // interface. once the projection seals the body this is where nearly all
-    // the load lives: penalization only ever sees the momentum that leaks past
-    // it in a step, so on its own it now under-reports lift badly
-    //
-    // runs after project(), and adds to what penalize() already accumulated
-    void accumulate_pressure_load() {
-        if (m_bodies.empty()) {
-            return;
-        }
+    // follows Chapter 3 to a tee.
+    void advect(Field2D &q, Field2D &q_prev, const Field2D &u, const Field2D &v,
+                int ox, int oy, double dt, Interp interp = Interp::Linear) {
 
-        for (size_t j = 0; j < m_ny; j++) {
-            for (size_t i = 1; i < m_nx; i++) {
-
-                const double dth = cell_fluid_fraction(i, j) -
-                                   cell_fluid_fraction(i - 1, j);
-                if (std::abs(dth) < 1e-12) {
-                    continue;
-                }
-
-                const bool lp = m_Adiag(i - 1, j) > 0.0;
-                const bool rp = m_Adiag(i, j) > 0.0;
-                if (!lp && !rp) {
-                    continue;
-                }
-
-                // a fully covered cell carries no pressure of its own, so the
-                // wall value is whatever the fluid side holds
-                const double p = 0.5 * ((lp ? m_p(i - 1, j) : m_p(i, j)) +
-                                        (rp ? m_p(i, j) : m_p(i - 1, j)));
-                const double fx = -m_h * p * dth;
-                const Vector2d fc =
-                    m_origin + Vector2d(i * m_h, (j + 0.5) * m_h);
-
-                const int b = nearest_body(fc);
-                if (b < 0) {
-                    continue;
-                }
-
-                m_body_force[b].x() += fx;
-                m_body_torque[b] += -fc.y() * fx;
-            }
-        }
-
-        for (size_t j = 1; j < m_ny; j++) {
-            for (size_t i = 0; i < m_nx; i++) {
-
-                const double dth = cell_fluid_fraction(i, j) -
-                                   cell_fluid_fraction(i, j - 1);
-                if (std::abs(dth) < 1e-12) {
-                    continue;
-                }
-
-                const bool bp = m_Adiag(i, j - 1) > 0.0;
-                const bool tp = m_Adiag(i, j) > 0.0;
-                if (!bp && !tp) {
-                    continue;
-                }
-
-                const double p = 0.5 * ((bp ? m_p(i, j - 1) : m_p(i, j)) +
-                                        (tp ? m_p(i, j) : m_p(i, j - 1)));
-                const double fy = -m_h * p * dth;
-                const Vector2d fc =
-                    m_origin + Vector2d((i + 0.5) * m_h, j * m_h);
-
-                const int b = nearest_body(fc);
-                if (b < 0) {
-                    continue;
-                }
-
-                m_body_force[b].y() += fy;
-                m_body_torque[b] += fc.x() * fy;
-            }
-        }
-    }
-
-    // rk2 backtrace in the index frame of a field staggered by (ox, oy),
-    // following Chapter 3 to a tee
-    void backtrace(size_t i, size_t j, int ox, int oy, double dt, double *x,
-                   double *y) const {
-
+        // we use semi lagrangian and trace backwards
         // since we have cell sizes != 1
-        const double dt0 = dt / m_h;
-        double u, v;
+        double dt0 = dt / m_h;
 
-        if (ox == 0 && oy == 0) {
-            // eq. 2.22
-            u = (m_u(i, j) + m_u(i + 1, j)) / 2.0;
-            v = (m_v(i, j) + m_v(i, j + 1)) / 2.0;
-        } else if (ox == 1 && oy == 0) {
-            // eq 2.23
-            u = m_u(i, j);
-            v = (m_v(i - 1, j) + m_v(i, j) + m_v(i - 1, j + 1) +
-                 m_v(i, j + 1)) /
-                4.0;
-        } else if (ox == 0 && oy == 1) {
-            // eq. 2.24
-            u = (m_u(i, j - 1) + m_u(i + 1, j - 1) + m_u(i, j) +
-                 m_u(i + 1, j)) /
-                4.0;
-            v = m_v(i, j);
-        } else {
-            assert(false && "invalid cell offset supplied");
-            u = v = 0.0;
-        }
+        for (size_t i = ox; i < q.m_W - ox; i++) {
+            for (size_t j = oy; j < q.m_H - oy; j++) {
+                double u, v;
 
-        double um, vm;
-        vel_at_q(i - 0.5 * dt0 * u, j - 0.5 * dt0 * v, ox, oy, &um, &vm);
+                if (ox == 0 && oy == 0) {
+                    // eq. 2.22
+                    u = (m_u(i, j) + m_u(i + 1, j)) / 2.0;
+                    v = (m_v(i, j) + m_v(i, j + 1)) / 2.0;
+                } else if (ox == 1 && oy == 0) {
+                    // eq 2.23
+                    u = m_u(i, j);
+                    v = (m_v(i - 1, j) + m_v(i, j) + m_v(i - 1, j + 1) +
+                         m_v(i, j + 1)) /
+                        4.0;
+                } else if (ox == 0 && oy == 1) {
+                    // eq. 2.24
+                    u = (m_u(i, j - 1) + m_u(i + 1, j - 1) + m_u(i, j) +
+                         m_u(i + 1, j)) /
+                        4.0;
+                    v = m_v(i, j);
 
-        *x = i - dt0 * um;
-        *y = j - dt0 * vm;
-    }
+                } else {
+                    assert(false && "invalid cell offset supplied");
+                }
 
-    // the prescribed faces are never advected, so carry them across rather than
-    // leave whatever the swapped-out buffer held two frames ago
-    static void copy_border(Field2D &dst, const Field2D &src, int ox, int oy) {
-        if (ox)
-            for (size_t j = 0; j < dst.m_H; j++) {
-                dst(0, j) = src(0, j);
-                dst(dst.m_W - 1, j) = src(dst.m_W - 1, j);
-            }
-        if (oy)
-            for (size_t i = 0; i < dst.m_W; i++) {
-                dst(i, 0) = src(i, 0);
-                dst(i, dst.m_H - 1) = src(i, dst.m_H - 1);
-            }
-    }
+                // rk2 backtrace
+                double xm = i - 0.5 * dt0 * u;
+                double ym = j - 0.5 * dt0 * v;
+                double um, vm;
+                vel_at_q(xm, ym, ox, oy, &um, &vm);
 
-    void advect(Field2D &q, const Field2D &q_prev, int ox, int oy, double dt,
-                Interp interp = Interp::Linear) {
-        copy_border(q, q_prev, ox, oy);
+                double x = i - dt0 * um;
+                double y = j - dt0 * vm;
 
-        for (size_t j = oy; j < q.m_H - oy; j++) {
-            for (size_t i = ox; i < q.m_W - ox; i++) {
-                double x, y;
-                backtrace(i, j, ox, oy, dt, &x, &y);
                 q(i, j) = sample(q_prev, x, y, interp);
             }
-        }
-    }
-
-    // min/max over the bilinear stencil the forward pass read from. clamping to
-    // it is what keeps the correction from inventing new extrema, which is the
-    // only thing standing between MacCormack and blow-up
-    static void stencil_bounds(const Field2D &f, double x, double y, double *lo,
-                               double *hi) {
-        const int W = (int)f.m_W, H = (int)f.m_H;
-        x = std::clamp(x, 0.0, (double)W - 1.0);
-        y = std::clamp(y, 0.0, (double)H - 1.0);
-
-        const int i0 = (int)x, j0 = (int)y;
-        const int i1 = std::min(i0 + 1, W - 1), j1 = std::min(j0 + 1, H - 1);
-        const double a = f(i0, j0), b = f(i1, j0);
-        const double c = f(i0, j1), d = f(i1, j1);
-
-        *lo = std::min(std::min(a, b), std::min(c, d));
-        *hi = std::max(std::max(a, b), std::max(c, d));
-    }
-
-    // a forward then backward semi-Lagrangian round trip measures the scheme's
-    // own error, and half of it cancels the first-order dissipation that
-    // otherwise smears a shed vortex away within a chord of the body
-    void advect_mc(Field2D &q, const Field2D &q_prev, Field2D &fwd,
-                   Field2D &back, int ox, int oy, double dt) {
-        advect(fwd, q_prev, ox, oy, dt, Interp::Linear);
-        advect(back, fwd, ox, oy, -dt, Interp::Linear);
-        copy_border(q, q_prev, ox, oy);
-
-        for (size_t j = oy; j < q.m_H - oy; j++) {
-            for (size_t i = ox; i < q.m_W - ox; i++) {
-                double x, y;
-                backtrace(i, j, ox, oy, dt, &x, &y);
-
-                double lo, hi;
-                stencil_bounds(q_prev, x, y, &lo, &hi);
-                q(i, j) = std::clamp(
-                    fwd(i, j) + 0.5 * (q_prev(i, j) - back(i, j)), lo, hi);
-            }
-        }
-    }
-
-    // explicit viscous diffusion, sub-stepped to stay inside h^2/4nu. only
-    // worth having now that advection no longer swamps it: this is what
-    // actually sets the Reynolds number rather than the grid doing it by
-    // accident
-    void diffuse_velocity(double dt) {
-        if (m_visc <= 0.0)
-            return;
-
-        const int n =
-            std::max(1, (int)std::ceil(4.0 * m_visc * dt / (m_h * m_h)));
-        const double a = m_visc * (dt / n) / (m_h * m_h);
-
-        for (int s = 0; s < n; s++) {
-            m_u_tmp = m_u;
-            m_v_tmp = m_v;
-
-            for (size_t j = 1; j + 1 < m_u.m_H; j++)
-                for (size_t i = 1; i + 1 < m_u.m_W; i++)
-                    m_u(i, j) += a * (m_u_tmp(i - 1, j) + m_u_tmp(i + 1, j) +
-                                      m_u_tmp(i, j - 1) + m_u_tmp(i, j + 1) -
-                                      4.0 * m_u_tmp(i, j));
-
-            for (size_t j = 1; j + 1 < m_v.m_H; j++)
-                for (size_t i = 1; i + 1 < m_v.m_W; i++)
-                    m_v(i, j) += a * (m_v_tmp(i - 1, j) + m_v_tmp(i + 1, j) +
-                                      m_v_tmp(i, j - 1) + m_v_tmp(i, j + 1) -
-                                      4.0 * m_v_tmp(i, j));
         }
         apply_velocity_bc();
     }
@@ -820,42 +474,21 @@ class MACFluidSolver : public FluidSolver {
         build_d();                 // computes the divergence rhs
         build_pressure_matrix(dt); // computes the compact representation for A
         build_preconditioner();    // computes the MIC(0) preconditioner matrix
-        solve_pressure(200, m_ptol);   // computes the m_p field through PCG
+        solve_pressure(200, 1e-6); // computes the m_p field through PCG
         subtract_pressure_gradient(dt); // computes the u^{n+1} in the interior
         apply_velocity_bc();            // reasserts the prescribed faces
     }
 
     // d_{i, j} = -(div u)_{i, j} (rhs of eq. 4.19). boundary faces have BC
     // values already
-    //
-    // the flux through a face is its fluid part plus whatever the solid
-    // covering the rest of it is carrying, so a moving body displaces fluid
-    // instead of just blocking it
     void build_d() {
-        auto flux = [](double w, double q, double qs) {
-            return w * q + (1.0 - w) * qs;
-        };
-
         // reverse loop order so indexing is contiguous
         for (size_t j = 0; j < m_ny; j++) {
             for (size_t i = 0; i < m_nx; i++) {
-
-                const double wl = m_wu(i, j), wr = m_wu(i + 1, j);
-                const double wb = m_wv(i, j), wt = m_wv(i, j + 1);
-
-                // a fully covered cell has no equation, and leaving a residual
-                // there would stall PCG against a row it cannot touch
-                if (wl + wr + wb + wt <= 0.0) {
-                    m_rhs(i, j) = 0.0;
-                    continue;
-                }
-
                 // delta x = m_h
-                m_rhs(i, j) = -(flux(wr, m_u(i + 1, j), m_usol(i + 1, j)) -
-                                flux(wl, m_u(i, j), m_usol(i, j)) +
-                                flux(wt, m_v(i, j + 1), m_vsol(i, j + 1)) -
-                                flux(wb, m_v(i, j), m_vsol(i, j))) /
-                              m_h;
+                m_rhs(i, j) =
+                    -(m_u(i + 1, j) - m_u(i, j) + m_v(i, j + 1) - m_v(i, j)) /
+                    m_h;
             }
         }
     }
@@ -867,13 +500,6 @@ class MACFluidSolver : public FluidSolver {
     // a non-solid face adds 'scale' to the diagonal
     // a fluid face gets the -scale off-diagonal
     // a empty face adds to the diagonal only (p = 0)
-    //
-    // each face now contributes its fluid area fraction rather than a flat 1,
-    // which is the whole cut-cell idea: the body gets a dp/dn = 0 condition on
-    // its actual surface instead of on the nearest staircase of cell walls, so
-    // a thin cambered foil at an arbitrary angle stays smooth on a coarse grid.
-    // symmetry survives because the coefficient between two cells is the weight
-    // of the single face they share
     void build_pressure_matrix(double dt) {
         const double scale = dt / (m_rho * m_h * m_h);
         m_Adiag.zero();
@@ -885,25 +511,22 @@ class MACFluidSolver : public FluidSolver {
                 // every central difference we do includes a p_{i, j},
                 // unless boundary conditions dictate otherwise
 
-                const double wl = m_wu(i, j), wr = m_wu(i + 1, j);
-                const double wb = m_wv(i, j), wt = m_wv(i, j + 1);
-
                 // "+1" to p_{i, j} coefficient in equation 4.19
                 // cell to the left
                 if (nbr(i - 1, j) != N_SOLID) {
-                    m_Adiag(i, j) += wl * scale;
+                    m_Adiag(i, j) += scale;
                 }
                 // cell below
                 if (nbr(i, j - 1) != N_SOLID) {
-                    m_Adiag(i, j) += wb * scale;
+                    m_Adiag(i, j) += scale;
                 }
                 // cell to the right
                 if (nbr(i + 1, j) != N_SOLID) {
-                    m_Adiag(i, j) += wr * scale;
+                    m_Adiag(i, j) += scale;
                 }
                 // cell above
                 if (nbr(i, j + 1) != N_SOLID) {
-                    m_Adiag(i, j) += wt * scale;
+                    m_Adiag(i, j) += scale;
                 }
 
                 // (nb. yes we can store the "up" and "right" fluid type rather
@@ -913,10 +536,10 @@ class MACFluidSolver : public FluidSolver {
                 // (which is -1) since we can retrieve the rest from neighbour
                 // stores
                 if (nbr(i + 1, j) == N_FLUID) {
-                    m_Aplusi(i, j) = -wr * scale;
+                    m_Aplusi(i, j) = -scale;
                 }
                 if (nbr(i, j + 1) == N_FLUID) {
-                    m_Aplusj(i, j) = -wt * scale;
+                    m_Aplusj(i, j) = -scale;
                 }
             }
         }
@@ -979,35 +602,14 @@ class MACFluidSolver : public FluidSolver {
     }
     // preconditioned CG solve, based on fig 4.1
     // solves the A*p = d equation
-    //
-    // tol is measured against the rhs rather than as an absolute bound. as an
-    // absolute number it was unreachable -- d is a divergence, so it scales
-    // with u/h and starts around 1e2 here -- and every solve ran the full
-    // iteration budget
-    //
-    // the previous pressure is kept as the initial guess: consecutive solves
-    // barely differ, and once a frame is substepped that alone roughly halves
-    // the iteration count
-    void solve_pressure(int max_iter, double tol = 1e-4) {
+    void solve_pressure(int max_iter, double tol = 1e-10) {
 
-        m_pcg_iters = 0;
-        const double target = tol * max_abs(m_rhs);
+        m_p.zero(); // initial guess p = 0,
 
-        // a cell the body has since covered has no equation left, so its stale
-        // pressure would poison the guess
-        for (size_t k = 0; k < m_p.size(); k++) {
-            if (m_Adiag[k] <= 0.0) {
-                m_p[k] = 0.0;
-            }
-        }
-
-        applyA(m_p, m_pcg_z);
-        for (size_t k = 0; k < m_rhs.size(); k++) {
-            m_pcg_r[k] = m_rhs[k] - m_pcg_z[k];
-        }
+        m_pcg_r = m_rhs; // residual r = d - A * 0 = d
 
         // means its already divergence free
-        if (max_abs(m_pcg_r) <= target) {
+        if (max_abs(m_pcg_r) <= tol) {
             return;
         }
 
@@ -1021,7 +623,6 @@ class MACFluidSolver : public FluidSolver {
 
         // we loop until we finish or max iterations have been reached
         for (int it = 0; it < max_iter; it++) {
-            m_pcg_iters = it + 1;
 
             // we compute z = A * s, the auxiliary vector
             applyA(m_pcg_s, m_pcg_z);
@@ -1041,7 +642,7 @@ class MACFluidSolver : public FluidSolver {
             }
 
             // check if we converged
-            if (max_abs(m_pcg_r) <= target) {
+            if (max_abs(m_pcg_r) <= tol) {
                 return;
             }
             // set the auxiliary vector z, z = M^-1 * r
@@ -1060,16 +661,13 @@ class MACFluidSolver : public FluidSolver {
         }
     }
 
+    // nb. this doesn't yet account for a solid having a velocity
+    //
     // u^{n + 1} = u - (dt / rho) * div p
     // a face is corrected iff both its cells are non-solid (which matches the
     // matrix)
     // a solid/inflow face stays the same
     // an empty (outflow) cell contributes p = 0
-    //
-    // a face with no fluid left in it takes the body's own velocity, and a face
-    // whose neighbour cell is fully covered mirrors the fluid side: zero
-    // gradient is the wall condition, where a 0 would be a hole for pressure to
-    // drain through
     //
     // based on eqn. 4.9
     void subtract_pressure_gradient(double dt) {
@@ -1086,20 +684,10 @@ class MACFluidSolver : public FluidSolver {
                 if (L == N_SOLID || R == N_SOLID) {
                     continue;
                 }
-                if (m_wu(i, j) <= 0.0) {
-                    m_u(i, j) = m_usol(i, j);
-                    continue;
-                }
-
-                const bool lp = (L == N_FLUID) && m_Adiag(i - 1, j) > 0.0;
-                const bool rp = (R == N_FLUID) && m_Adiag(i, j) > 0.0;
 
                 // dirichlet for non fluids
-                const double pL = lp ? m_p(i - 1, j)
-                                     : ((rp && L == N_FLUID) ? m_p(i, j) : 0.0);
-                const double pR =
-                    rp ? m_p(i, j)
-                       : ((lp && R == N_FLUID) ? m_p(i - 1, j) : 0.0);
+                const double pL = (L == N_FLUID) ? m_p(i - 1, j) : 0.0;
+                const double pR = (R == N_FLUID) ? m_p(i, j) : 0.0;
 
                 m_u(i, j) -= scale * (pR - pL);
             }
@@ -1115,20 +703,10 @@ class MACFluidSolver : public FluidSolver {
                 if (T == N_SOLID || B == N_SOLID) {
                     continue;
                 }
-                if (m_wv(i, j) <= 0.0) {
-                    m_v(i, j) = m_vsol(i, j);
-                    continue;
-                }
-
-                const bool bp = (B == N_FLUID) && m_Adiag(i, j - 1) > 0.0;
-                const bool tp = (T == N_FLUID) && m_Adiag(i, j) > 0.0;
 
                 // dirichlet for non fluids
-                const double pB = bp ? m_p(i, j - 1)
-                                     : ((tp && B == N_FLUID) ? m_p(i, j) : 0.0);
-                const double pT =
-                    tp ? m_p(i, j)
-                       : ((bp && T == N_FLUID) ? m_p(i, j - 1) : 0.0);
+                const double pB = (B == N_FLUID) ? m_p(i, j - 1) : 0.0;
+                const double pT = (T == N_FLUID) ? m_p(i, j) : 0.0;
 
                 m_v(i, j) -= scale * (pT - pB);
             }
@@ -1314,7 +892,6 @@ class MACFluidSolver : public FluidSolver {
     }
 
     // demo/coupling helpers
-    int pcg_iterations() const { return m_pcg_iters; }
     int nx() const { return (int)m_nx; }
     int ny() const { return (int)m_ny; }
     double cell_size() const { return m_h; }
@@ -1449,22 +1026,7 @@ class MACFluidSolver : public FluidSolver {
     std::vector<double> m_body_torque; // about the world origin
     Field2D m_chi_u, m_chi_v;          // per-face solid fraction
     Field2D m_usol, m_vsol;            // per-face solid velocity
-    bool m_no_slip = false;            // see set_no_slip
     double m_eta = 1e-4;               // penalization permeability
-
-    // cut cells
-    Field2D m_phi;          // solid sdf at grid nodes
-    Field2D m_wu, m_wv;     // per-face fluid area fraction (1 - chi)
-    Field2D m_lvl_u, m_lvl_v; // extrapolation layer index
-
-    double m_visc = 0.0;
-    double m_cfl = 0.0; // 0 = one step per advance, as before
-    int m_max_substeps = 8;
-    int m_pcg_iters = 0;
-    // 5e-4 measured against 1e-4 on the flutter foil: same Cl to 3 decimals and
-    // the same wake three chords back, for a third fewer iterations. past 2e-3
-    // the shed vortices start washing out
-    double m_ptol = 5e-4;
 
     // temperature field
     Field2D m_T, m_T_prev;
@@ -1473,9 +1035,6 @@ class MACFluidSolver : public FluidSolver {
     // velocity self-advection targets + vorticity confinement work fields
     Field2D m_u_tmp, m_v_tmp;
     Field2D m_curl, m_fcx, m_fcy;
-
-    // maccormack forward/backward targets, one pair per staggering
-    Field2D m_mc_ua, m_mc_ub, m_mc_va, m_mc_vb, m_mc_ca, m_mc_cb;
 
     // pressure solve (cell-centred)
     // A in the compact form outlined in 4.3.1, the MIC(0)

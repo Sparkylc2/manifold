@@ -155,6 +155,10 @@ add_executable(train_esn_demo tools/train_esn_demo.cpp)
 target_link_libraries(train_esn_demo PRIVATE manifold_ai manifold_fluid)
 target_include_directories(train_esn_demo PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
+add_executable(train_forecast_demo tools/train_forecast_demo.cpp)
+target_link_libraries(train_forecast_demo PRIVATE manifold_ai manifold_fluid)
+target_include_directories(train_forecast_demo PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
 # ---- profiling ----
 add_subdirectory(src/profiling)
 

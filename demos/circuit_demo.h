@@ -1,5 +1,7 @@
 #pragma once
 
+#include "analog_pid.h"
+
 #include <manifold/renderer/circuit_visuals.h>
 #include <manifold/renderer/demo_base.h>
 #include <manifold/renderer/equation_cache.h>
@@ -18,6 +20,7 @@
 #include <deque>
 #include <functional>
 #include <string>
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -30,7 +33,7 @@ using Vector2d = Eigen::Vector2d;
 //   [G] a gallery of every element glyph
 //   [A] controller stages page 1: summing amp + integrator
 //   [S] controller stages page 2: differentiator + active low-pass
-//   [P] full analog PID, rotated so input is on top and output on the bottom
+//   [P] full analog PID, turned so the inputs are on top and V_out below
 // on the stage pages: [V] toggles the selected source, Left/Right cycle its
 // drive function; the live equation is drawn in the HUD.
 class CircuitDemo : public DemoBase {
@@ -45,13 +48,13 @@ class CircuitDemo : public DemoBase {
     double default_cam_x() const override {
         if (m_scene == 2 || m_scene == 3)
             return 0.3;
-        return m_scene == 4 ? 0.0 : -0.4;
+        return m_scene == 4 ? 0.3 : -0.4;
     }
     double default_cam_y() const override {
         if (m_scene == 2 || m_scene == 3)
             return 1.2;
         if (m_scene == 4)
-            return 2.0;
+            return -2.6;
         return 0.4;
     }
     double default_cam_zoom() const override {
@@ -60,11 +63,17 @@ class CircuitDemo : public DemoBase {
         case 3:
             return 38.0;
         case 4:
-            return 21.0;
+            return 62.0;
         default:
             return 52.0;
         }
     }
+
+    // the reel picks the scene before initialize()
+    void set_scene(int s) { m_scene = s; }
+
+    // the drawn extent of the PID page, once built
+    const PidArt &pid_art() const { return m_art; }
 
     void initialize() override {
         if (m_scene == 0)
@@ -84,6 +93,10 @@ class CircuitDemo : public DemoBase {
             m_sys.process(dt);
             m_scope_in.sample(m_sys);
             m_scope_out.sample(m_sys);
+        } else if (m_scene == 4) {
+            m_apid->process(dt);
+            for (auto &w : m_art.scopes)
+                w.sample(m_apid->sys);
         } else if (m_scene >= 2) {
             for (auto &c : m_cards) {
                 c.sys.process(dt);
@@ -102,10 +115,23 @@ class CircuitDemo : public DemoBase {
             Rendering::draw_circuit(r, m_schem);
             render_gallery(r);
         } else {
-            for (auto &c : m_cards)
-                render_card(r, c);
+            render_cell(r);
             render_stage_hud(r);
         }
+    }
+
+    // HUD-less: no grid, no legend, no key hints
+    void render_cell(Rendering::Renderer *r) override {
+        if (m_scene < 2) {
+            Rendering::draw_circuit(r, m_schem);
+            return;
+        }
+        if (m_scene == 4) {
+            m_art.render(r, m_apid->sys, VMax, m_eq);
+            return;
+        }
+        for (auto &c : m_cards)
+            render_card(r, c);
     }
 
   protected:
@@ -432,7 +458,7 @@ class CircuitDemo : public DemoBase {
         draw_legend(r);
         const char *tt = m_scene == 2   ? "SUMMING AMP  +  INTEGRATOR"
                          : m_scene == 3 ? "DIFFERENTIATOR  +  ACTIVE LOW-PASS"
-                                        : "ANALOG PID  (rotated: in top, out bottom)";
+                                        : "ANALOG PID";
         Rendering::HUDPanel hud(r, 12, 12);
         hud.title(tt, Rendering::palette::accent2());
         hud.small_text("[V] select source   Left/Right change function",
@@ -457,140 +483,22 @@ class CircuitDemo : public DemoBase {
         hint(hud);
     }
 
-    // ---- scene 5: full analog PID, rotated 90 CW (input top, output bottom)
-    // nodes: 0 in 1 err 2 Xa 3 E 4 Xp 5 P 6 Xi 7 I 8 Xd 9 Dmid 10 D
-    //        11 Xs 12 S 13 Xo 14 OUT
+    // ---- scene 5: full analog PID ----
+    // topology, layout and routing all live in PidArt (demos/analog_pid.h) so
+    // this page and the cart-pendulum controller draw the same picture. Only
+    // the drive is different: here the two inputs are the cyclable function
+    // library rather than a plant's state.
     void build_pid() {
         m_cards.clear();
-        m_cards.reserve(1);
-        m_cards.emplace_back();
-        Card &c = m_cards.back();
-        auto dim = Rendering::palette::text_dim();
-        // rotate helpers: CW 90 sends left -> top, right -> bottom. VS stretches
-        // the (now vertical) signal axis so stages sit further apart.
-        const double VS = 1.5;
-        auto T = [VS](Vector2d p) -> Vector2d { return {p.y(), -p.x() * VS}; };
-        const double TR = -M_PI / 2;
-
-        addV(c, 0, -1, 0); // in  (V1 library)
-        addV(c, 1, -1, 1); // err (V2 library)
-        auto RG = [&](int a, int b, double ohm) -> int {
-            addR(c, a, b, ohm);
-            return (int)c.res.size() - 1;
-        };
-        const int iRa1 = RG(0, 2, 10e3), iRa2 = RG(1, 2, 10e3),
-                  iRfa = RG(2, 3, 10e3);
-        const int iRp = RG(3, 4, 10e3), iRfp = RG(4, 5, 10e3);
-        const int iRi = RG(3, 6, 100e3);
-        const int iRsd = RG(9, 8, 1e3), iRfd = RG(8, 10, 100e3);
-        const int iRs1 = RG(5, 11, 10e3), iRs2 = RG(7, 11, 10e3),
-                  iRs3 = RG(10, 11, 10e3), iRfs = RG(11, 12, 10e3);
-        const int iRo1 = RG(12, 13, 10e3), iRfo = RG(13, 14, 10e3);
-        addC(c, 6, 7, 10e-6); // Ci
-        addC(c, 3, 9, 1e-6);  // Cd
-        const int oin[6] = {2, 4, 6, 8, 11, 13};
-        const int oout[6] = {3, 5, 7, 10, 12, 14};
-        for (int k = 0; k < 6; ++k)
-            addOp(c, oin[k], oout[k]);
-        c.sys.set_substep_dt(2e-5);
-
-        c.schem = Rendering::CircuitSchematic{};
-        c.schem.ortho = true;
-        c.schem.deadzone = 0.35;
-        auto OP = [&](int idx, Vector2d p) {
-            int i = c.schem.add(Rendering::Glyph::OpAmp, T(p), TR, &c.ops[idx],
-                                1.25);
-            c.schem.placements[i].ground_inp = true;
-            return i;
-        };
-        auto RS = [&](int idx, Vector2d p, const char *e) {
-            int i =
-                c.schem.add(Rendering::Glyph::Resistor, T(p), TR, &c.res[idx], 1.4);
-            lab(c, T(p + Vector2d(0, 0.42)), e, dim, 13);
-            return i;
-        };
-        auto CS = [&](int cidx, Vector2d p, const char *e) {
-            int i = c.schem.add(Rendering::Glyph::Capacitor, T(p), TR,
-                                &c.caps[cidx], 1.3);
-            lab(c, T(p + Vector2d(0, 0.42)), e, dim, 13);
-            return i;
-        };
-        const int oA = OP(0, {-6.8, 0.0}), oP = OP(1, {-3.0, 3.4}),
-                  oI = OP(2, {-3.0, 0.0}), oD = OP(3, {-3.0, -3.4}),
-                  oS = OP(4, {2.2, 0.0}), oO = OP(5, {5.2, 0.0});
-        const int vin = c.schem.add(Rendering::Glyph::VoltageSource,
-                                    T({-9.3, 1.0}), TR, &c.srcs[0], 1.1);
-        const int ver = c.schem.add(Rendering::Glyph::VoltageSource,
-                                    T({-9.3, -1.0}), TR, &c.srcs[1], 1.1);
-        const int ra1 = RS(iRa1, {-8.0, 0.5}, "rl_int_r1"),
-                  ra2 = RS(iRa2, {-8.0, -0.5}, "rl_int_r1"),
-                  rfa = RS(iRfa, {-6.8, 1.3}, "rl_int_r1");
-        const int rp = RS(iRp, {-4.7, 3.4}, "rl_int_r1"),
-                  rfp = RS(iRfp, {-3.0, 4.5}, "rl_int_r1");
-        const int ri = RS(iRi, {-4.7, 0.0}, "rl_dif_rf");
-        const int ci = CS(0, {-3.0, 1.2}, "rl_int_cf");
-        const int cd = CS(1, {-5.3, -3.4}, "rl_dif_c1"),
-                  rsd = RS(iRsd, {-4.1, -3.4}, "rl_lp_r1"),
-                  rfd = RS(iRfd, {-3.0, -2.2}, "rl_dif_rf");
-        const int rs1 = RS(iRs1, {0.4, 3.4}, "rl_int_r1"),
-                  rs2 = RS(iRs2, {0.4, 0.0}, "rl_int_r1"),
-                  rs3 = RS(iRs3, {0.4, -3.4}, "rl_int_r1"),
-                  rfs = RS(iRfs, {2.2, 1.3}, "rl_int_r1");
-        const int ro1 = RS(iRo1, {3.9, 0.0}, "rl_int_r1"),
-                  rfo = RS(iRfo, {5.2, 1.3}, "rl_int_r1");
-        c.schem.connect(vin, 0, ra1, 0);
-        c.schem.connect(ver, 0, ra2, 0);
-        c.schem.connect(ra1, 1, oA, 1);
-        c.schem.connect(ra2, 1, oA, 1);
-        c.schem.connect(rfa, 0, oA, 1);
-        c.schem.connect(rfa, 1, oA, 2);
-        c.schem.connect(oA, 2, rp, 0);
-        c.schem.connect(oA, 2, ri, 0);
-        c.schem.connect(oA, 2, cd, 0);
-        c.schem.connect(rp, 1, oP, 1);
-        c.schem.connect(rfp, 0, oP, 1);
-        c.schem.connect(rfp, 1, oP, 2);
-        c.schem.connect(ri, 1, oI, 1);
-        c.schem.connect(ci, 0, oI, 1);
-        c.schem.connect(ci, 1, oI, 2);
-        c.schem.connect(cd, 1, rsd, 0);
-        c.schem.connect(rsd, 1, oD, 1);
-        c.schem.connect(rfd, 0, oD, 1);
-        c.schem.connect(rfd, 1, oD, 2);
-        c.schem.connect(oP, 2, rs1, 0);
-        c.schem.connect(oI, 2, rs2, 0);
-        c.schem.connect(oD, 2, rs3, 0);
-        c.schem.connect(rs1, 1, oS, 1);
-        c.schem.connect(rs2, 1, oS, 1);
-        c.schem.connect(rs3, 1, oS, 1);
-        c.schem.connect(rfs, 0, oS, 1);
-        c.schem.connect(rfs, 1, oS, 2);
-        c.schem.connect(oS, 2, ro1, 0);
-        c.schem.connect(ro1, 1, oO, 1);
-        c.schem.connect(rfo, 0, oO, 1);
-        c.schem.connect(rfo, 1, oO, 2);
-        const int wout = c.schem.add_node(T({6.6, 0.0}), 14);
-        c.schem.connect_node(oO, 2, wout);
-        c.grounds = {c.schem.pin_world(vin, 1), c.schem.pin_world(ver, 1)};
-
-        auto acc3 = Rendering::palette::accent3();
-        auto acc4 = Rendering::palette::accent4();
-        lab(c, T({-9.3, 1.9}), "lab_vin", acc3);
-        lab(c, T({-9.3, -0.4}), "lab_err", acc4);
-        lab(c, T({-3.0, 2.6}), "lab_P", Rendering::palette::accent1());
-        lab(c, T({-3.0, -0.9}), "lab_I", acc3);
-        lab(c, T({-3.0, -4.5}), "lab_D", acc4);
-        lab(c, T({6.6, 0.9}), "lab_vout", Rendering::palette::accent2());
-
-        scope(c, 0, T({-9.3, 3.2}), 0.8, acc3);
-        scope(c, 5, T({-6.4, 3.2}), 1.2, Rendering::palette::accent1());
-        scope(c, 7, T({-3.5, 3.2}), 1.2, acc3);
-        scope(c, 10, T({-0.6, 3.2}), 0.4, acc4);
-        scope(c, 14, T({6.6, -2.4}), 1.5, Rendering::palette::accent2());
-
-        c.title = "eq_pid";
-        c.title_pos = T({-9.3, 5.2});
+        m_apid = std::make_unique<AnalogPid>();
+        m_apid->build(1.0, 0.5, 0.05, 0.01, 2.0);
+        m_apid->v_ref.m_fv = v1_funcs()[m_v1i].fv;
+        m_apid->v_meas.m_fv = v2_funcs()[m_v2i].fv;
+        m_art.build(
+            *m_apid,
+            {.title = false, .rotate = true, .line_w = 0.6, .scope_v = 0.8});
     }
+
 
     // ---- scene 1: RC low-pass (unchanged) ----
     void build_circuit() {
@@ -731,8 +639,12 @@ class CircuitDemo : public DemoBase {
     Electrical::Capacitor m_cap;
     Rendering::VoltageScope m_scope_in, m_scope_out;
 
-    // scenes 3-5 (stage pages + PID)
+    // scenes 3-4 (stage pages)
     std::vector<Card> m_cards;
+
+    // scene 5 (PID)
+    std::unique_ptr<AnalogPid> m_apid;
+    PidArt m_art;
 
     Rendering::CircuitSchematic m_schem;
     std::vector<std::pair<Vector2d, std::string>> m_labels;

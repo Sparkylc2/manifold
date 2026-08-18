@@ -22,24 +22,31 @@
 ## cart kickup
 - done
 ## engine
-- looks good, done
+- replace with the crane one or the metronome one
 
 # 2
 ## fea flutter
-- fix the amount but lwkey lets just leave it at that. we can fuck with it once we slow down speed
-- change to "fluid\n speed" and "stress" on the bottom
+- looks good, but explodes at higher mesh sizes on the FEA
+- fix colouring sensitivity once recording settings have been set
 ## foil flutter
-- looks good, just sizing
+- fix the damping, the vortex issue doesn't seem to be very solveable, so instead damping increased
 ## nozzle
-- definitely in the video have it sped up a bit
-- draw the nozzle procedurally, looks weird right now
+- definitely in the video have it sped up a bit, increase res, see if we can improve it a little
+
 
 # 3
-## pod 
-- do we want the bars to only occupy ~half if at 46% KE? right now they maximize
-- outside of that, good, colours are ice, idea is pretty polished off. maybe fix the sizing of the 
-bar so they align with the size of the box aorund the mode (which its slightly larger right now)
+## narration
+> Once the state is that small, you can learn how it evolves, and decode back
+> out. Watch the echo state network and an LSTM predict the next 2.5 seconds of
+> the flow. Neither stays correct forever, and neither could. In a chaotic
+> system, any error grows exponentially (the largest Lyapunov exponent is
+> positive).
 
+The 2.5 s is exact, not a round number: `ForecastKarmanDemo::HORIZON` is 50
+rollout steps at `SNAP_DT` = 0.05 s. Changing either breaks the line.
+
+## pod 
+- good, but add the opacity thing we have for the fea and the foil
 ## esn + lstm
 - we will have both fully trained and fitted properly, and show a live reconstruction going forward however many seconds, as well as a reconstruction error plot
 - will run next to eachother at the same time, just do what the current esn demo does

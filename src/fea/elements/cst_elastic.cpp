@@ -121,7 +121,7 @@ void CstElastic::corotated_stiffness(const Matrix2d &R, MatrixXd &K) const {
     K = Re * m_Ke * Re.transpose();
 }
 
-double CstElastic::von_mises(const VectorXd &pos) const {
+Vector3d CstElastic::cauchy_stress(const VectorXd &pos) const {
     assert(pos.size() == 6);
 
     const Matrix2d R = rotation(pos);
@@ -138,13 +138,22 @@ double CstElastic::von_mises(const VectorXd &pos) const {
     strain_displacement(B);
 
     const Matrix3d D = constitutive(m_mat);
-    const Vector3d sigma = D * (B * u_local);
+    return D * (B * u_local);
+}
 
-    const double sxx = sigma(0);
-    const double syy = sigma(1);
-    const double txy = sigma(2);
-
+double CstElastic::von_mises(const VectorXd &pos) const {
+    const Vector3d sigma = cauchy_stress(pos);
+    const double sxx = sigma(0), syy = sigma(1), txy = sigma(2);
     return std::sqrt(sxx * sxx - sxx * syy + syy * syy + 3.0 * txy * txy);
+}
+
+double CstElastic::von_mises_signed(const VectorXd &pos) const {
+    const Vector3d sigma = cauchy_stress(pos);
+    const double sxx = sigma(0), syy = sigma(1), txy = sigma(2);
+    const double vm =
+        std::sqrt(sxx * sxx - sxx * syy + syy * syy + 3.0 * txy * txy);
+    // hydrostatic trace picks tension vs compression
+    return (sxx + syy) >= 0.0 ? vm : -vm;
 }
 
 } // namespace manifold::FEA

@@ -39,6 +39,8 @@ class DemoBase {
     void clear_overlays();
 
     bool portrait_mode() const;
+    // [P] is the interactive way in; an unattended capture has no keyboard
+    void set_portrait_mode(bool on) { m_portrait_mode = on; }
 
   protected:
     virtual void on_input(Rendering::Renderer *r);

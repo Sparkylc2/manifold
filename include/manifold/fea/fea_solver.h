@@ -10,6 +10,8 @@
 #include <manifold/fea/mesh.h>
 
 #include <Eigen/Sparse>
+#include <algorithm>
+#include <cmath>
 #include <memory>
 #include <vector>
 
@@ -38,6 +40,9 @@ class FeaSolver {
     virtual void release_node(int i) = 0;
 
     virtual double von_mises(int element) const = 0;
+
+    // von Mises signed by hydrostatic stress: +tension, -compression
+    virtual double von_mises_signed(int element) const = 0;
 };
 
 // mesh of CstElastic, corotational tangent + implicit newmark
@@ -69,6 +74,7 @@ class ElasticBody : public FeaSolver {
     void release_node(int i) override;
 
     double von_mises(int element) const override;
+    double von_mises_signed(int element) const override;
 
     int element_count() const { return (int)m_elems.size(); }
     const Mesh &mesh() const { return m_mesh; }
@@ -77,6 +83,21 @@ class ElasticBody : public FeaSolver {
 
     // total elastic + kinetic energy, handy as a stability check
     double energy() const;
+
+    // element-scale wave transit time min(h)/c, c = sqrt(E/(rho(1-nu^2))).
+    // Newmark is unconditionally stable on the linear problem, so this is not
+    // a hard limit -- it is the scale past which the once-per-step corotational
+    // tangent and any explicitly-coupled load stop tracking, which is what
+    // actually goes unstable. divide a coupled dt by it to size substeps
+    double critical_step() const { return m_h_over_c; }
+
+    // substeps needed to keep dt/n under safety * critical_step()
+    int substeps_for(double dt, double safety = 4.0, int max_n = 16) const {
+        if (m_h_over_c <= 0.0 || dt <= 0.0)
+            return 1;
+        const int n = (int)std::ceil(dt / (safety * m_h_over_c));
+        return std::clamp(n, 1, max_n);
+    }
 
   private:
     // warped tangent sum(Re*Ke*Re^T) and internal force sum(Re*Ke*(Re^T*p - x)),
@@ -94,7 +115,13 @@ class ElasticBody : public FeaSolver {
     std::vector<CstElastic *> m_cst;
 
     std::unique_ptr<Assembler> m_assembler;
-    Newmark m_integrator;
+    // trapezoidal (gamma = 1/2) is only unconditionally stable for the *linear*
+    // problem; the corotational rotation is frozen at the predictor, so the
+    // element-scale modes get a little energy injected every step and nothing
+    // takes it back out. refining the mesh raises omega_max like 1/h and the
+    // mesh eventually detonates. gamma = 0.6 costs ~1e-4 on the coarse-mesh
+    // response and makes refinement converge instead
+    Newmark m_integrator{0.3025, 0.6};
 
     SparseMatrix<double> m_M;  // mass
     SparseMatrix<double> m_K0; // unwarped stiffness, only for rayleigh damping
@@ -114,6 +141,7 @@ class ElasticBody : public FeaSolver {
     VectorXd m_f_ext_bc;
     VectorXd m_u_pred;
     std::vector<char> m_fixed_dof;
+    double m_h_over_c = 0.0;
     bool m_built = false;
 };
 

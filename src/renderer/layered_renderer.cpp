@@ -177,6 +177,17 @@ void LayeredRenderer::draw_shaded(unsigned int shader, const Vertex2D *v,
     push(resolve(Layer::Content), c);
 }
 
+void LayeredRenderer::begin_offscreen() {
+    push(resolve(Layer::Content), Cmd{Op::BeginOffscreen});
+}
+
+void LayeredRenderer::end_offscreen(unsigned int shader, Blend blend) {
+    Cmd c{Op::EndOffscreen};
+    c.shader = shader;
+    c.blend = blend;
+    push(resolve(Layer::Content), c);
+}
+
 // --- pass-through ---
 
 bool LayeredRenderer::init(const RendererConfig &cfg) {
@@ -330,6 +341,12 @@ void LayeredRenderer::execute(const Cmd &c) {
     case Op::Shaded:
         m_inner->draw_shaded(c.shader, c.verts.data(), (int)c.verts.size(),
                              c.blend);
+        break;
+    case Op::BeginOffscreen:
+        m_inner->begin_offscreen();
+        break;
+    case Op::EndOffscreen:
+        m_inner->end_offscreen(c.shader, c.blend);
         break;
     }
 }

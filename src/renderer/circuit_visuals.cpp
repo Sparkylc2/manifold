@@ -163,7 +163,7 @@ void draw_voltage_source(Renderer *r, const Vector2d &a, const Vector2d &b,
     line(r, a, c - u * rad, s.body_thick, s.body);
     line(r, c + u * rad, b, s.body_thick, s.body);
     circle_outline(r, c, rad, s.body_thick, s.body);
-    const Vector2d cp = c - u * (rad * 0.45), cm = c + u * (rad * 0.45);
+    const Vector2d cp = c - u * (rad * 0.38), cm = c + u * (rad * 0.38);
     const double m = s.mark_len * L;
     line(r, cp - u * m, cp + u * m, s.body_thick, s.mark);
     line(r, cp - pp * m, cp + pp * m, s.body_thick, s.mark);
@@ -217,9 +217,12 @@ void draw_op_amp(Renderer *r, const Vector2d &in_p, const Vector2d &in_n,
     line(r, in_n, bot, s.body_thick, s.body);
     line(r, apex, out, s.body_thick, s.body);
 
+    // pulled well in off the back corners: the marks sit where the body has
+    // already started narrowing toward the apex, so an offset that clears the
+    // sloping edge at the mark's centre still lets the arm of the + touch it
     const double m = hp * 0.2;
-    const Vector2d cp = top - pp * (hp * 0.59) + u * (0.16 * Lax);
-    const Vector2d cm = bot + pp * (hp * 0.59) + u * (0.16 * Lax);
+    const Vector2d cp = top - pp * (hp * 0.70) + u * (0.16 * Lax);
+    const Vector2d cm = bot + pp * (hp * 0.70) + u * (0.16 * Lax);
     line(r, cp - u * m, cp + u * m, s.body_thick, s.mark);
     line(r, cp - pp * m, cp + pp * m, s.body_thick, s.mark);
     line(r, cm - pp * m, cm + pp * m, s.body_thick, s.mark);

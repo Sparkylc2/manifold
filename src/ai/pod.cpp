@@ -30,6 +30,32 @@ double POD::cumulative_energy(int r) const {
     return m_sigma.head(r).squaredNorm() / m_sig2_total;
 }
 
+void POD::serialize(Archive &ar) {
+    if (ar.saving()) {
+        MatrixXd U = m_modes.leftCols(m_rank);
+        VectorXd s = m_sigma.head(m_rank);
+        ar("mean", m_mean);
+        ar("modes", U);
+        ar("sigma", s);
+    } else {
+        ar("mean", m_mean);
+        ar("modes", m_modes);
+        ar("sigma", m_sigma);
+    }
+    ar("rank", m_rank);
+    ar("sig2_total", m_sig2_total);
+}
+
+void POD::save(const std::string &path) {
+    SaveArchive a(path);
+    serialize(a);
+}
+
+void POD::load(const std::string &path) {
+    LoadArchive a(path);
+    serialize(a);
+}
+
 VectorXd POD::encode(const VectorXd &x) const {
     return m_modes.leftCols(m_rank).transpose() * (x - m_mean);
 }

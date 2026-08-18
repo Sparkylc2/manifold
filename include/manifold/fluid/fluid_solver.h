@@ -93,6 +93,19 @@ class FluidSolver {
 
     // reset the whole simulation field
     virtual void clear() {}
+
+    // Snapshot / rewind, for strongly-coupled stepping.
+    //
+    // A staggered fluid-body loop reads the load one step behind the motion
+    // that caused it, which for a body lighter than the fluid it displaces is
+    // the added-mass instability. Iterating the step to a fixed point instead
+    // means replaying the SAME step against successive guesses at the load, so
+    // the fluid has to be rewindable.
+    //
+    // Returns false if the solver cannot, and the caller then falls back to a
+    // single explicit pass.
+    virtual bool save_state() { return false; }
+    virtual bool restore_state() { return false; }
 };
 
 } // namespace manifold::Fluid

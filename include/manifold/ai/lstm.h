@@ -10,6 +10,7 @@
 #include <manifold/ai/layer.h>
 #include <manifold/ai/utilities.h>
 
+#include <algorithm>
 #include <cmath>
 #include <format>
 #include <iostream>
@@ -23,6 +24,27 @@ namespace manifold::AI {
 class LSTM {
   public:
     struct LSTMCfg {};
+
+    struct TrainCfg {
+        int N_wash = 100;
+        int seq_len = 100;
+        int epochs = 40;
+        double lr = 3e-3;
+        double clip = 5.0;
+        // gaussian jitter on the teacher-forced inputs, as a fraction of each
+        // channel's spread. without it the net only ever sees exact states and
+        // the closed loop walks off the manifold within a few steps
+        double noise = 0.0;
+        int seed = 0;
+        bool verbose = true;
+    };
+
+    // live stepping state. h/c are the recurrent pair, x the (normalized)
+    // input the next step will consume -- a real observation in open loop, the
+    // previous prediction in closed loop
+    struct Rollout {
+        VectorXd h, c, x;
+    };
 
     LSTM(int N_dim, int N_units, LSTMCfg cfg = {}, int seed = 0)
         : N_dim(N_dim), /* observable/physical dim (== N_in == N_out here) */
@@ -144,15 +166,37 @@ class LSTM {
     }
 
     // data is (N_dim, T) and is a single long trajectory (in physical units)
-    void train(const MatrixXd &data, int N_wash = 100, int seq_len = 100,
-               int epochs = 40, double lr = 3e-3, double clip = 5.0,
-               int seed = 0) {
+    double train(const MatrixXd &data, int N_wash = 100, int seq_len = 100,
+                 int epochs = 40, double lr = 3e-3, double clip = 5.0,
+                 int seed = 0) {
+        return train(data, TrainCfg{.N_wash = N_wash,
+                                    .seq_len = seq_len,
+                                    .epochs = epochs,
+                                    .lr = lr,
+                                    .clip = clip,
+                                    .seed = seed});
+    }
+
+    double train(const MatrixXd &data, TrainCfg tcfg) {
+        // washout and one window have to fit inside the series, or the warmup
+        // loop walks straight off the end of it
+        const int T = (int)data.cols();
+        const int N_wash = std::min(tcfg.N_wash, std::max(0, T - 2));
+        const int seq_len = std::min(tcfg.seq_len, T - N_wash - 2);
+        if (T < 4 || seq_len < 1) {
+            std::cout << std::format(
+                "LSTM::train: series of {} is too short for wash {} + seq {}\n",
+                T, tcfg.N_wash, tcfg.seq_len);
+            return 0.0;
+        }
+        const double lr = tcfg.lr, clip = tcfg.clip;
 
         // using range norm for now
         set_norm(data);
-        MatrixXd U = data.array().colwise() / norm.array();
+        const MatrixXd U = data.array().colwise() / norm.array();
 
-        rng.seed(seed);
+        rng.seed(tcfg.seed);
+        std::normal_distribution<double> jitter(0.0, 1.0);
 
         // adam step parameters
         prep_adam_step();
@@ -160,8 +204,9 @@ class LSTM {
         constexpr double b2 = 0.999;
         constexpr double eps = 1e-8;
         int tstep = 0;
+        double epoch_loss = 0.0;
 
-        for (int epoch = 0; epoch < epochs; epoch++) {
+        for (int epoch = 0; epoch < tcfg.epochs; epoch++) {
             VectorXd h = VectorXd::Zero(N_h);
             VectorXd c = VectorXd::Zero(N_h);
 
@@ -171,12 +216,21 @@ class LSTM {
 
             int ptr = N_wash;
             double total = 0.0;
+            int windows = 0;
             while (ptr + seq_len + 1 < U.cols()) {
                 // want to block out x_t ---- x_T
                 // and offset Y by one so it's the frame it's trying to
                 // predict
-                const MatrixXd X = U.block(0, ptr, U.rows(), seq_len);
+                MatrixXd X = U.block(0, ptr, U.rows(), seq_len);
                 const MatrixXd Yt = U.block(0, ptr + 1, U.rows(), seq_len);
+
+                // targets stay clean: the net learns to map a perturbed state
+                // back onto the true next one, which is what a closed loop
+                // needs it to do with its own error
+                if (tcfg.noise > 0.0)
+                    for (int j = 0; j < X.cols(); j++)
+                        for (int i = 0; i < X.rows(); i++)
+                            X(i, j) += tcfg.noise * jitter(rng);
 
                 // running to fill the caches and data for training
                 MatrixXd Yh;
@@ -188,6 +242,7 @@ class LSTM {
                 // also across time)
                 double mse = 0.5 * r.array().square().mean();
                 total += mse;
+                windows++;
 
                 // backprop to get the grads
                 // we divide by r.cols() since we are doing a mean gradient
@@ -236,10 +291,14 @@ class LSTM {
 
                 // then update the ptr
                 ptr += seq_len;
-                std::cout << std::format("epoch: {} loss {:.4f}\n", epoch,
-                                         total);
             }
+
+            epoch_loss = windows ? total / windows : 0.0;
+            if (tcfg.verbose)
+                std::cout << std::format("epoch: {} loss {:.6f}\n", epoch,
+                                         epoch_loss);
         }
+        return epoch_loss;
     }
 
     // X_phys is [N_dim x T] warms up on a true sequence
@@ -270,6 +329,51 @@ class LSTM {
         recon.array().colwise() *= norm.array();
     }
 
+    Rollout fresh_rollout() const {
+        return {VectorXd::Zero(N_h), VectorXd::Zero(N_h),
+                VectorXd::Zero(N_dim)};
+    }
+
+    // open loop: driven by a real observation, returns its one-step-ahead
+    // prediction and leaves that prediction staged as the next input
+    VectorXd advance(Rollout &s, const VectorXd &x_phys) {
+        s.x = x_phys.array() / norm.array();
+        return step_rollout(s);
+    }
+
+    // closed loop: consumes whatever advance()/predict_step() staged last
+    VectorXd predict_step(Rollout &s) { return step_rollout(s); }
+
+    int dim() const { return N_dim; }
+    int units() const { return N_h; }
+
+    // checkpoint weights; construct with the same (N_dim, N_units) before load
+    void serialize(Archive &ar) {
+        ar("Wf", Wf);
+        ar("Wi", Wi);
+        ar("Wg", Wg);
+        ar("Wo", Wo);
+        ar("Uf", Uf);
+        ar("Ui", Ui);
+        ar("Ug", Ug);
+        ar("Uo", Uo);
+        ar("bf", bf);
+        ar("bi", bi);
+        ar("bg", bg);
+        ar("bo", bo);
+        ar("Wy", Wy);
+        ar("by", by);
+        ar("norm", norm);
+    }
+    void save(const std::string &path) {
+        SaveArchive a(path);
+        serialize(a);
+    }
+    void load(const std::string &path) {
+        LoadArchive a(path);
+        serialize(a);
+    }
+
     // set norm with range
     // X is (N_dim, T)
     void set_norm(const MatrixXd &X) {
@@ -282,6 +386,14 @@ class LSTM {
     }
 
   private:
+    // one uncached step from a staged input, feeding the prediction back in
+    VectorXd step_rollout(Rollout &s) {
+        VectorXd y;
+        step(s.x, s.h, s.c, &y, false);
+        s.x = y;
+        return y.array() * norm.array();
+    }
+
     // computes the backprop for the data in dY
     // each column of dY is really dL/dy
     void backward(const MatrixXd &dY) {
@@ -306,11 +418,13 @@ class LSTM {
 
             // dL/do = dL/dh * dh/do
             const VectorXd d_o = dh.array() * c_tanh_cache[t].array();
-            // dL/dc = dL/dh * dh/dc + (dL/dc)_next
+            // dL/dc = dL/dh * dh/dc + (dL/dc)_next. the carry is the CELL
+            // gradient from t+1, not the hidden one -- crossing them leaks the
+            // h path into c and the long-range memory never trains
             const VectorXd dc =
                 dh.array() * o_cache[t].array() *
                     (1 - c_tanh_cache[t].array() * c_tanh_cache[t].array()) +
-                delta_h_next.array();
+                delta_c_next.array();
 
             // dL/df = dL/dc * dc/df
             const VectorXd df = dc.array() * c_prev_cache[t].array();

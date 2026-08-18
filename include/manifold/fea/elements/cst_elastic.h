@@ -57,9 +57,15 @@ class CstElastic : public Element {
     // von Mises stress from current node positions
     double von_mises(const VectorXd &pos) const;
 
+    // von Mises magnitude signed by the hydrostatic stress: +tension, -compression
+    double von_mises_signed(const VectorXd &pos) const;
+
     double rest_area() const { return m_area; }
 
   private:
+    // cauchy stress [sxx, syy, txy] in the corotated frame
+    Vector3d cauchy_stress(const VectorXd &pos) const;
+
     // fills the 3x3 plane-stress constitutive matrix from m_mat
     static Matrix3d constitutive(const Material &m);
 

@@ -47,6 +47,13 @@ class PODKarmanDemo : public DemoBase {
     static constexpr double PERT_MIN = 0.05 * INFLOW;
     static constexpr double PERT_REF = 0.60 * INFLOW;
     static constexpr int FADE_PX = 18;
+    // taper width as a fraction of panel height, applied in world units
+    static constexpr double EDGE_PAD_FRAC = 0.4;
+    // Captions anchor this far below the panel's top edge rather than on it.
+    // The upper part of the field is uniform freestream, drawn at zero alpha
+    // and softened further by the edge taper, so a caption on the edge floats
+    // clear of the picture. Moves the TEXT only -- the panels do not shift.
+    static constexpr double LABEL_DROP = 1.1;
 
     static constexpr int N_MODES = 8;
     // shedding POD modes come out in near-degenerate quadrature pairs: sigma_2k
@@ -89,7 +96,7 @@ class PODKarmanDemo : public DemoBase {
     static constexpr double REVEAL_HOLD = 3.6;
     static constexpr double HILITE_DUR = 0.45; // border fade-IN, then it holds
     static constexpr double BAR_IN = 0.25;
-    static constexpr double HILITE_M = 0.10; // hilite inset, also the bar's
+    static constexpr double HILITE_M = 0.0; // hilite inset, also the bar's
     static constexpr double MODE_GAMMA = 0.5;
     static constexpr double BAR_ROUND = 0.45; // 1.0 would be a full capsule
     // the harmonic pair holds ~3% of the leader's energy, which is a bar two
@@ -287,7 +294,8 @@ class PODKarmanDemo : public DemoBase {
         const Vector2d lo = panel_origin(lx, ly, CELL);
         r->draw_circle((lo + (m_center - o)).x(), (lo + (m_center - o)).y(),
                        RADIUS, Rendering::palette::foreground());
-        label(r, lx, ly + H, "LIVE", Rendering::palette::accent2());
+        label(r, lx, ly + H - LABEL_DROP, "LIVE",
+              Rendering::palette::accent2());
 
         // reconstruction, right
         if (m_have_pod && m_recon.size() != 0) {
@@ -313,7 +321,8 @@ class PODKarmanDemo : public DemoBase {
             const Vector2d ro = panel_origin(rx, ly, CELL) + (m_center - o);
             r->draw_circle(ro.x(), ro.y(), RADIUS,
                            Rendering::palette::foreground());
-            label(r, rx, ly + H, sfmt("RECONSTRUCTION  rank %d", rank()),
+            label(r, rx, ly + H - LABEL_DROP,
+                  sfmt("RECONSTRUCTION  rank %d", rank()),
                   Rendering::palette::accent2());
         }
 
@@ -331,6 +340,7 @@ class PODKarmanDemo : public DemoBase {
         for (int k = 0; k < n; k++)
             e_ref = std::max(e_ref, m_bar[k]);
 
+        e_ref *= 2;
         const int shown = m_auto_reveal ? std::min(n, revealed()) : n;
         const double age = newest_age();
 
@@ -848,14 +858,22 @@ class PODKarmanDemo : public DemoBase {
         return Vector2d(px - CLIP_L * COLS * cell, py);
     }
 
-    static bool clip_ij(const Vector2d &fo, double cell, double wx, double wy,
-                        int &i, int &j) {
-        const double dx = wx - fo.x();
-        if (dx < CLIP_L * COLS * cell || dx > CLIP_R * COLS * cell)
-            return false;
+    // returns the edge taper for this texel, 0 outside the visible window.
+    // the crop is what would otherwise put a hard vertical line down the left
+    // of every panel, and the grid's own texel fade cannot reach it -- the
+    // texture runs past the crop. pad is a fraction of the panel height so the
+    // small mode panels taper by the same proportion as the big pair above them
+    static double clip_ij(const Vector2d &fo, double cell, double wx, double wy,
+                          int &i, int &j) {
+        const double dx = wx - fo.x(), dy = wy - fo.y();
+        const double w = Rendering::window_alpha(
+            dx, dy, CLIP_L * COLS * cell, 0.0, CLIP_R * COLS * cell,
+            ROWS * cell, EDGE_PAD_FRAC * ROWS * cell);
+        if (w <= 0.0)
+            return 0.0;
         i = (int)(dx / cell);
-        j = (int)((wy - fo.y()) / cell);
-        return i >= 0 && i < COLS && j >= 0 && j < ROWS;
+        j = (int)(dy / cell);
+        return (i >= 0 && i < COLS && j >= 0 && j < ROWS) ? w : 0.0;
     }
 
     void
@@ -868,11 +886,13 @@ class PODKarmanDemo : public DemoBase {
             Rendering::FieldView::Sample(
                 [&, fo, cell](double wx, double wy, double &val, double &a) {
                     int i, j;
-                    if (!clip_ij(fo, cell, wx, wy, i, j)) {
+                    const double w = clip_ij(fo, cell, wx, wy, i, j);
+                    if (w <= 0.0) {
                         a = 0.0;
                         return;
                     }
                     at(i, j, val, a);
+                    a *= w;
                 }));
     }
 
@@ -886,11 +906,13 @@ class PODKarmanDemo : public DemoBase {
                       [&, fo, cell](double wx, double wy, Rendering::Color &col,
                                     double &a) {
                           int i, j;
-                          if (!clip_ij(fo, cell, wx, wy, i, j)) {
+                          const double w = clip_ij(fo, cell, wx, wy, i, j);
+                          if (w <= 0.0) {
                               a = 0.0;
                               return;
                           }
                           at(i, j, col, a);
+                          a *= w;
                       }));
     }
 

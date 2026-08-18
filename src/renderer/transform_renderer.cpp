@@ -152,6 +152,33 @@ void TransformRenderer::draw_texture(unsigned int tex_id, int tex_w, int tex_h,
                           flip_v, fade(tint));
 }
 
+// vertex positions are world coords, so they take the slot transform like any
+// other geometry; the colours take the crossfade, or the cell's shaded parts
+// would hold full strength while the rest of it faded out
+void TransformRenderer::draw_shaded(unsigned int shader, const Vertex2D *v,
+                                    int count, Blend blend) {
+    if (count <= 0)
+        return;
+    m_scratch.assign(v, v + count);
+    for (Vertex2D &q : m_scratch) {
+        const double x = tx(q.x), y = ty(q.y);
+        q.x = x;
+        q.y = y;
+        q.color = fade(q.color);
+    }
+    m_inner->draw_shaded(shader, m_scratch.data(), count, blend);
+}
+
+unsigned int TransformRenderer::load_shader(const std::string &fs_path) {
+    return m_inner->load_shader(fs_path);
+}
+
+void TransformRenderer::begin_offscreen() { m_inner->begin_offscreen(); }
+
+void TransformRenderer::end_offscreen(unsigned int shader, Blend blend) {
+    m_inner->end_offscreen(shader, blend);
+}
+
 // --- camera ---
 
 void TransformRenderer::screen_to_world(int sx, int sy, double *wx,

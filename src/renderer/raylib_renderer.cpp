@@ -33,7 +33,7 @@ bool RaylibRenderer::init(const RendererConfig &config) {
 
     // font setup
     // std::cout << "init" << config.font_path << std::endl;
-    load_font("../" + config.font_path, config.font_size);
+    load_font(config.font_path, config.font_size);
 
     // FXAA post-processing setup
     if (m_use_fxaa) {
@@ -51,6 +51,10 @@ bool RaylibRenderer::init(const RendererConfig &config) {
 void RaylibRenderer::shutdown() {
     if (m_recording)
         end_recording();
+    if (m_capturing)
+        end_capture();
+    if (m_off_rt.id != 0)
+        UnloadRenderTexture(m_off_rt);
     if (m_has_custom_font)
         UnloadFont(m_font);
     if (m_use_fxaa) {
@@ -70,6 +74,10 @@ void RaylibRenderer::shutdown() {
 bool RaylibRenderer::should_close() { return WindowShouldClose(); }
 
 void RaylibRenderer::begin_frame() {
+    if (m_capturing) {
+        bind_capture(true);
+        return;
+    }
     // resize render target if window changed
     if (m_use_fxaa) {
         int sw = GetScreenWidth(), sh = GetScreenHeight();
@@ -88,6 +96,28 @@ void RaylibRenderer::begin_frame() {
 }
 
 void RaylibRenderer::end_frame() {
+    if (m_capturing) {
+        unbind_capture();
+        write_capture_frame();
+
+        // the window is only a monitor while capturing: it shows the frame
+        // that was just written, letterboxed, so what you watch is what landed
+        // on disk rather than a separately laid-out copy of it
+        BeginDrawing();
+        ClearBackground(detail::to_rl(palette::background()));
+        const float tw = (float)m_cap_out.texture.width;
+        const float th = (float)m_cap_out.texture.height;
+        if (tw > 0.0f && th > 0.0f) {
+            const float sw = (float)GetScreenWidth(), sh = (float)GetScreenHeight();
+            const float s = std::min(sw / tw, sh / th);
+            const Rectangle dst{0.5f * (sw - tw * s), 0.5f * (sh - th * s),
+                                tw * s, th * s};
+            DrawTexturePro(m_cap_out.texture, {0, 0, tw, -th}, dst, {0, 0},
+                           0.0f, ::Color{255, 255, 255, 255});
+        }
+        EndDrawing();
+        return;
+    }
     if (m_use_fxaa) {
         EndTextureMode();
         BeginDrawing();
@@ -190,6 +220,214 @@ void RaylibRenderer::end_recording() {
         pclose(m_rec_pipe);
         m_rec_pipe = nullptr;
     }
+}
+
+// ---- PNG sequence capture ----
+
+Camera2D RaylibRenderer::target_camera() const {
+    Camera2D c{};
+    c.offset = {0.0f, 0.0f};
+    c.rotation = 0.0f;
+    if (m_capturing) {
+        c.target = {m_cap_crop.x, m_cap_crop.y};
+        c.zoom = m_cap_crop.height > 0.0f
+                     ? (float)m_cap_rt.texture.height / m_cap_crop.height
+                     : 1.0f;
+        return c;
+    }
+    // a render texture gets none of the hi-dpi scaling raylib applies when it
+    // draws to the window, so logical px have to be put onto the retina
+    // framebuffer by hand or the frame lands in a quarter of the buffer
+    const int lw = GetScreenWidth();
+    c.target = {0.0f, 0.0f};
+    c.zoom = lw > 0 ? (float)GetRenderWidth() / (float)lw : 1.0f;
+    return c;
+}
+
+void RaylibRenderer::bind_capture(bool clear) {
+    BeginTextureMode(m_cap_rt);
+    if (clear)
+        ClearBackground(detail::to_rl(palette::background()));
+    BeginMode2D(m_cap_cam);
+}
+
+void RaylibRenderer::unbind_capture() {
+    EndMode2D();
+    EndTextureMode();
+}
+
+void RaylibRenderer::write_capture_frame() {
+    if (m_cap_out.id == 0)
+        return;
+
+    // resolve the supersampled buffer on the GPU; a bilinear draw at an
+    // integer ratio is the box filter, and it costs nothing next to pulling
+    // the big buffer across the bus and letting the CPU shrink it
+    const float sw = (float)m_cap_rt.texture.width;
+    const float sh = (float)m_cap_rt.texture.height;
+    BeginTextureMode(m_cap_out);
+    DrawTexturePro(m_cap_rt.texture, {0, 0, sw, -sh},
+                   {0, 0, (float)m_cap_out.texture.width,
+                    (float)m_cap_out.texture.height},
+                   {0, 0}, 0.0f, ::Color{255, 255, 255, 255});
+    EndTextureMode();
+
+    Image img = LoadImageFromTexture(m_cap_out.texture);
+    if (!img.data)
+        return;
+    ImageFlipVertical(&img); // render targets are stored bottom-up
+
+    char path[512];
+    std::snprintf(path, sizeof(path), "%s/frame_%05d.png", m_cap_dir.c_str(),
+                  m_cap_frame);
+    ExportImage(img, path);
+    UnloadImage(img);
+    m_cap_frame++;
+}
+
+bool RaylibRenderer::begin_capture(const std::string &dir, int out_height,
+                                   int ssaa, int crop_x, int crop_y,
+                                   int crop_w, int crop_h) {
+    if (m_capturing)
+        return false;
+
+    const int lw = GetScreenWidth(), lh = GetScreenHeight();
+    if (lw <= 0 || lh <= 0)
+        return false;
+
+    if (crop_w <= 0 || crop_h <= 0) {
+        crop_x = 0;
+        crop_y = 0;
+        crop_w = lw;
+        crop_h = lh;
+    }
+    crop_x = std::clamp(crop_x, 0, lw - 1);
+    crop_y = std::clamp(crop_y, 0, lh - 1);
+    crop_w = std::min(crop_w, lw - crop_x);
+    crop_h = std::min(crop_h, lh - crop_y);
+
+    m_cap_ssaa = std::clamp(ssaa, 1, 4);
+    const double z = (double)std::max(out_height, 2) / crop_h;
+
+    // even output dims, so the sequence goes straight into an h.264 encode
+    // later without ffmpeg having to pad it
+    int ow = (int)std::lround(crop_w * z) & ~1;
+    int oh = (int)std::lround(crop_h * z) & ~1;
+    if (ow <= 0 || oh <= 0)
+        return false;
+
+    if (!DirectoryExists(dir.c_str()) && MakeDirectory(dir.c_str()) != 0) {
+        std::fprintf(stderr, "[capture] could not create %s\n", dir.c_str());
+        return false;
+    }
+
+    m_cap_rt = LoadRenderTexture(ow * m_cap_ssaa, oh * m_cap_ssaa);
+    m_cap_out = LoadRenderTexture(ow, oh);
+    if (m_cap_rt.id == 0 || m_cap_out.id == 0) {
+        std::fprintf(stderr, "[capture] render target allocation failed\n");
+        return false;
+    }
+    SetTextureFilter(m_cap_rt.texture, TEXTURE_FILTER_BILINEAR);
+    SetTextureFilter(m_cap_out.texture, TEXTURE_FILTER_BILINEAR);
+
+    m_cap_crop = {(float)crop_x, (float)crop_y, (float)crop_w, (float)crop_h};
+    m_cap_dir = dir;
+    m_cap_frame = 0;
+    m_capturing = true;
+    m_cap_cam = target_camera();
+
+    std::printf("[capture] %dx%d (x%d supersample) -> %s/frame_%%05d.png\n", ow,
+                oh, m_cap_ssaa, dir.c_str());
+    return true;
+}
+
+void RaylibRenderer::end_capture() {
+    if (!m_capturing)
+        return;
+    m_capturing = false;
+    if (m_cap_rt.id != 0)
+        UnloadRenderTexture(m_cap_rt);
+    if (m_cap_out.id != 0)
+        UnloadRenderTexture(m_cap_out);
+    m_cap_rt = {};
+    m_cap_out = {};
+}
+
+// ---- offscreen merge group ----
+
+void RaylibRenderer::begin_offscreen() {
+    if (m_in_offscreen)
+        return;
+
+    const int pw = m_capturing ? m_cap_rt.texture.width : GetRenderWidth();
+    const int ph = m_capturing ? m_cap_rt.texture.height : GetRenderHeight();
+    if (pw <= 0 || ph <= 0)
+        return;
+
+    if (m_off_rt.id == 0 || m_off_w != pw || m_off_h != ph) {
+        if (m_off_rt.id != 0)
+            UnloadRenderTexture(m_off_rt);
+        m_off_rt = LoadRenderTexture(pw, ph);
+        SetTextureFilter(m_off_rt.texture, TEXTURE_FILTER_BILINEAR);
+        m_off_w = pw;
+        m_off_h = ph;
+    }
+    if (m_off_rt.id == 0)
+        return;
+
+    if (m_capturing)
+        unbind_capture();
+
+    BeginTextureMode(m_off_rt);
+    ClearBackground(::Color{0, 0, 0, 0});
+    BeginMode2D(target_camera());
+
+    // Everything ADDS, colour included, and the shader writes PREMULTIPLIED
+    // colour. The buffer then holds sum(Ci*ai) over sum(ai), so the resolve's
+    // divide recovers the average colour exactly.
+    //
+    // Compositing colour with `over` while alpha accumulated was subtly wrong:
+    // two blobs at alpha 0.5 left rgb = 0.75*C against alpha 1.0, so the
+    // divide returned 0.75*C and every overlap darkened toward black.
+    rlSetBlendFactorsSeparate(RL_ONE, RL_ONE, RL_ONE, RL_ONE, RL_FUNC_ADD,
+                              RL_FUNC_ADD);
+    BeginBlendMode(BLEND_CUSTOM_SEPARATE);
+    m_in_offscreen = true;
+}
+
+void RaylibRenderer::end_offscreen(unsigned int shader, Blend blend) {
+    if (!m_in_offscreen)
+        return;
+
+    EndBlendMode();
+    EndMode2D();
+    EndTextureMode();
+    m_in_offscreen = false;
+
+    if (m_capturing)
+        bind_capture(false); // rebinding must not wipe what is already drawn
+
+    // the quad covers the captured region in logical px, which is exactly the
+    // extent the offscreen buffer holds
+    const Rectangle dst =
+        m_capturing ? m_cap_crop
+                    : Rectangle{0.0f, 0.0f, (float)GetScreenWidth(),
+                                (float)GetScreenHeight()};
+
+    auto it = m_shaders.find(shader);
+    const bool custom = shader && it != m_shaders.end();
+
+    BeginBlendMode(blend == Blend::Additive ? BLEND_ADDITIVE : BLEND_ALPHA);
+    if (custom)
+        BeginShaderMode(it->second);
+    const float tw = (float)m_off_rt.texture.width;
+    const float th = (float)m_off_rt.texture.height;
+    DrawTexturePro(m_off_rt.texture, {0, 0, tw, -th}, dst, {0, 0}, 0.0f,
+                   ::Color{255, 255, 255, 255});
+    rlDrawRenderBatchActive();
+    if (custom)
+        EndShaderMode();
+    EndBlendMode();
 }
 
 // --- world-space ---
@@ -416,21 +654,51 @@ void RaylibRenderer::draw_texture(unsigned int tex_id, int tex_w, int tex_h,
     DrawTexturePro(t, src, dst, {0, 0}, 0.0f, detail::to_rl(tint));
 }
 
+// Assets are searched next to the executable as well as against the cwd, so
+// the binary runs from wherever it is invoked. Only the cwd was tried before,
+// which meant launching it by path from another directory silently dropped
+// every shader and fell back to the default font -- with no symptom except
+// that the tracers came out unshaded.
+std::string RaylibRenderer::resolve_asset(const std::string &rel) {
+    if (rel.empty())
+        return {};
+    if (FileExists(rel.c_str()))
+        return rel;
+
+    const std::string app = GetApplicationDirectory();
+    for (const char *up : {"", "../", "../../", "../../../"}) {
+        const std::string p = app + up + rel;
+        if (FileExists(p.c_str()))
+            return p;
+    }
+    return {};
+}
+
 unsigned int RaylibRenderer::load_shader(const std::string &fs) {
-    if (!FileExists(fs.c_str())) {
-        TraceLog(LOG_WARNING, "shader not found (cwd-relative): %s",
+    // callers retry every frame while the handle is 0, so a miss has to be
+    // remembered or it re-warns forever
+    auto cached = m_shader_by_path.find(fs);
+    if (cached != m_shader_by_path.end())
+        return cached->second;
+
+    const std::string path = resolve_asset(fs);
+    if (path.empty()) {
+        TraceLog(LOG_WARNING, "shader not found: %s (cwd or next to the exe)",
                  fs.c_str());
+        m_shader_by_path[fs] = 0;
         return 0;
     }
 
-    Shader s = LoadShader(nullptr, fs.c_str());
+    Shader s = LoadShader(nullptr, path.c_str());
 
     if (s.id == rlGetShaderIdDefault()) {
-        TraceLog(LOG_WARNING, "shader failed to compile: %s", fs.c_str());
+        TraceLog(LOG_WARNING, "shader failed to compile: %s", path.c_str());
+        m_shader_by_path[fs] = 0;
         return 0;
     }
 
     m_shaders[s.id] = s;
+    m_shader_by_path[fs] = s.id;
     return s.id;
 }
 int RaylibRenderer::measure_text(const std::string &text, int font_size) {
@@ -554,7 +822,12 @@ void RaylibRenderer::draw_shaded(unsigned int shader, const Vertex2D *v,
     if (count <= 0)
         return;
 
-    BeginBlendMode(blend == Blend::Additive ? BLEND_ADDITIVE : BLEND_ALPHA);
+    // inside a merge group the group's separate-alpha blend is the point, and
+    // raylib's EndBlendMode resets to plain alpha rather than to what was
+    // there before -- so leave the mode alone and let the group own it
+    if (!m_in_offscreen)
+        BeginBlendMode(blend == Blend::Additive ? BLEND_ADDITIVE
+                                                : BLEND_ALPHA);
     auto it = m_shaders.find(shader);
     const bool custom = shader && it != m_shaders.end();
 
@@ -583,7 +856,8 @@ void RaylibRenderer::draw_shaded(unsigned int shader, const Vertex2D *v,
 
 void RaylibRenderer::load_font(const std::string &path, int base_size) {
     m_font_base_size = base_size;
-    if (!path.empty() && FileExists(path.c_str())) {
+    const std::string found = resolve_asset(path);
+    if (!found.empty()) {
         int codepoints[256];
         int count = 0;
         for (int i = 32; i < 256; ++i)
@@ -595,7 +869,7 @@ void RaylibRenderer::load_font(const std::string &path, int base_size) {
         for (int e : extras)
             codepoints[count++] = e;
 
-        m_font = LoadFontEx(path.c_str(), base_size, codepoints, count);
+        m_font = LoadFontEx(found.c_str(), base_size, codepoints, count);
         SetTextureFilter(m_font.texture, TEXTURE_FILTER_BILINEAR);
         m_has_custom_font = true;
     } else {

@@ -1,6 +1,9 @@
 #include <manifold/fea/elements/tri_thermal.h>
 #include <manifold/fea/fea_solver.h>
 
+#include <algorithm>
+#include <cmath>
+#include <limits>
 #include <stdexcept>
 #include <utility>
 
@@ -73,6 +76,26 @@ void ElasticBody::build() {
     m_f_int = VectorXd::Zero(n);
     m_f_ext_bc = VectorXd::Zero(n);
     m_K_eff.resize(n, n);
+
+    // smallest altitude over the mesh, divided by the dilatational wave speed.
+    // the altitude (not the edge) is what sets an element's stiffest mode, so
+    // slivers are correctly reported as the limiting ones
+    const double c =
+        std::sqrt(m_mat.E / (m_mat.rho * (1.0 - m_mat.nu * m_mat.nu)));
+    m_h_over_c = std::numeric_limits<double>::max();
+    for (int e = 0; e < m_mesh.tri_count(); e++) {
+        const Tri &t = m_mesh.tri(e);
+        const Vector2d a = m_mesh.rest(t.n[0]);
+        const Vector2d b = m_mesh.rest(t.n[1]);
+        const Vector2d d = m_mesh.rest(t.n[2]);
+        const double l_max = std::max({(b - a).norm(), (d - b).norm(),
+                                       (a - d).norm()});
+        const double area = m_cst[(size_t)e]->rest_area();
+        if (l_max > 1e-12 && area > 0.0)
+            m_h_over_c = std::min(m_h_over_c, 2.0 * area / l_max / c);
+    }
+    if (!std::isfinite(m_h_over_c))
+        m_h_over_c = 0.0;
 
     m_built = true;
 }
@@ -293,6 +316,12 @@ double ElasticBody::von_mises(int element) const {
     VectorXd pos;
     gather_positions(element, m_state.u, pos);
     return m_cst[(size_t)element]->von_mises(pos);
+}
+
+double ElasticBody::von_mises_signed(int element) const {
+    VectorXd pos;
+    gather_positions(element, m_state.u, pos);
+    return m_cst[(size_t)element]->von_mises_signed(pos);
 }
 
 double ElasticBody::energy() const {

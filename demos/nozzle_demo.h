@@ -28,9 +28,9 @@ class NozzleDemo : public DemoBase {
   public:
     // grid refinement; NX*CELL and NY*CELL stay at 4.320 x 1.008 of world, so
     // the field keeps its extent and the slot fitted to it is untouched
-    static constexpr double RES_SCALE = 1.0;
-    static constexpr int NX = (int)(360 * RES_SCALE);
-    static constexpr int NY = (int)(84 * RES_SCALE);
+    static constexpr double RES_SCALE = 1.2;
+    static constexpr int NX = (int)(420 * RES_SCALE);
+    static constexpr int NY = (int)(96 * RES_SCALE);
     static constexpr double CELL = 0.012 / RES_SCALE;
     // The plume advances at STEPS_PER_FRAME * cfl_dt of sim time per frame.
     // Buying that with more steps costs linearly; buying it with a larger CFL
@@ -78,7 +78,7 @@ class NozzleDemo : public DemoBase {
     // past the jet's own half-width
     //
     // cap_x = -0.6 is nice top right
-    static constexpr double CAP_X = -0.6, CAP_Y = 0.50;
+    static constexpr double CAP_X = 2.8, CAP_Y = -0.6;
     static constexpr int CAP_SIZE = 13;
 
     // Procedural art instead of the PNG. Every path in the source SVG is
@@ -302,38 +302,42 @@ class NozzleDemo : public DemoBase {
         return (float)std::max(1, std::abs(x1 - x0));
     }
 
-    void draw_nozzle_art(Rendering::Renderer *r) const {
-#include "nozzle_art.inc"
-        // the shell fill is exactly palette::background(), which is what makes
-        // the body read as a cut-out and occlude the plume. a literal would
-        // silently stop matching the moment the theme changed
-        const Rendering::Color shell = Rendering::palette::background();
-        const Rendering::Color plate = Rendering::Color::hex(0xA08C7AFF);
-        const Rendering::Color ink = Rendering::Color::hex(0x000000FF);
-
-        auto tris = [&](const float *v, int n, Rendering::Color c) {
-            for (int i = 0; i + 5 < n; i += 6) {
-                const Vector2d a = art_pt(v[i], v[i + 1]);
-                const Vector2d b = art_pt(v[i + 2], v[i + 3]);
-                const Vector2d d = art_pt(v[i + 4], v[i + 5]);
-                r->draw_triangle(a.x(), a.y(), b.x(), b.y(), d.x(), d.y(), c);
-            }
-        };
-        tris(ART_SHELL, (int)(sizeof(ART_SHELL) / sizeof(float)), shell);
-        tris(ART_PLATE, (int)(sizeof(ART_PLATE) / sizeof(float)), plate);
-
-        for (const auto &s : ART_LINE_IX) {
-            const float w = art_px(r, s.w);
-            for (int i = 0; i + 1 < s.n; i++) {
-                const Vector2d a = art_pt(ART_LINE[2 * (s.at + i)],
-                                          ART_LINE[2 * (s.at + i) + 1]);
-                const Vector2d b = art_pt(ART_LINE[2 * (s.at + i + 1)],
-                                          ART_LINE[2 * (s.at + i + 1) + 1]);
-                r->draw_line(a.x(), a.y(), b.x(), b.y(), w, ink);
-            }
-        }
-    }
-
+    //     void draw_nozzle_art(Rendering::Renderer *r) const {
+    // #include "nozzle_art.inc"
+    //         // the shell fill is exactly palette::background(), which is what
+    //         makes
+    //         // the body read as a cut-out and occlude the plume. a literal
+    //         would
+    //         // silently stop matching the moment the theme changed
+    //         const Rendering::Color shell = Rendering::palette::background();
+    //         const Rendering::Color plate = Rendering::Color::hex(0xA08C7AFF);
+    //         const Rendering::Color ink = Rendering::Color::hex(0x000000FF);
+    //
+    //         auto tris = [&](const float *v, int n, Rendering::Color c) {
+    //             for (int i = 0; i + 5 < n; i += 6) {
+    //                 const Vector2d a = art_pt(v[i], v[i + 1]);
+    //                 const Vector2d b = art_pt(v[i + 2], v[i + 3]);
+    //                 const Vector2d d = art_pt(v[i + 4], v[i + 5]);
+    //                 r->draw_triangle(a.x(), a.y(), b.x(), b.y(), d.x(),
+    //                 d.y(), c);
+    //             }
+    //         };
+    //         tris(ART_SHELL, (int)(sizeof(ART_SHELL) / sizeof(float)), shell);
+    //         tris(ART_PLATE, (int)(sizeof(ART_PLATE) / sizeof(float)), plate);
+    //
+    //         for (const auto &s : ART_LINE_IX) {
+    //             const float w = art_px(r, s.w);
+    //             for (int i = 0; i + 1 < s.n; i++) {
+    //                 const Vector2d a = art_pt(ART_LINE[2 * (s.at + i)],
+    //                                           ART_LINE[2 * (s.at + i) + 1]);
+    //                 const Vector2d b = art_pt(ART_LINE[2 * (s.at + i + 1)],
+    //                                           ART_LINE[2 * (s.at + i + 1) +
+    //                                           1]);
+    //                 r->draw_line(a.x(), a.y(), b.x(), b.y(), w, ink);
+    //             }
+    //         }
+    //     }
+    //
     void draw_nozzle(Rendering::Renderer *r) {
         if (ART_PROCEDURAL) {
             // draw_nozzle_art(r);
@@ -521,7 +525,7 @@ class NozzleDemo : public DemoBase {
 
     using Euler2D_BC = C::Euler2D::BC;
     C::Euler2D m_euler{NX, NY, CELL, CELL};
-    double m_pamb = 1.0, m_pe = 1.7;
+    double m_pamb = 1.0, m_pe = 5.0;
     bool m_turned = false;
     Rendering::FieldView m_field;
     Rendering::TextureView m_art;

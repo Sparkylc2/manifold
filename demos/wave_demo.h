@@ -35,6 +35,9 @@ class WaveDemo : public DemoBase {
 
     const char *name() const override { return "PDE — Wave"; }
 
+    // unattended: keep plucking so the sheet never settles into stillness
+    void set_auto_pluck(double period) { m_pluck_period = period; }
+
     void initialize() override {
         m_grid = PDE::Grid(N, N, SPAN / (N - 1));
         m_center = SPAN * 0.5;
@@ -58,6 +61,14 @@ class WaveDemo : public DemoBase {
         if (sim <= 0.0)
             return;
 
+        if (m_pluck_period > 0.0) {
+            m_t += sim;
+            if (m_t >= m_next_pluck) {
+                pluck();
+                m_next_pluck = m_t + m_pluck_period;
+            }
+        }
+
         const PDE::Laplacian lap(m_grid, C * C);
         const PDE::Laplacian lapv(m_grid, 1.0);
         const double dt_max = 0.35 * m_grid.h() / (C * std::sqrt(2.0));
@@ -68,12 +79,19 @@ class WaveDemo : public DemoBase {
 
         if (!std::isfinite(m_u.maxCoeff()))
             reset();
+
+        // the offscreen pass has to happen outside the frame's draw block, and
+        // process() is the only place that is true -- a showcase cell renders
+        // inside one
+        m_scene.capture([&] { draw_surface(); });
+    }
+
+    void render_cell(Rendering::Renderer *r) override {
+        m_scene.render(r, -PANEL / 2, -PANEL / 2, PANEL, PANEL);
     }
 
     void render(Rendering::Renderer *r) override {
-        m_scene.capture([&] { draw_surface(); });
-
-        m_scene.render(r, -PANEL / 2, -PANEL / 2, PANEL, PANEL);
+        render_cell(r);
 
         Rendering::HUDPanel hud(r, 12, 12);
         hud.title("WAVE", Rendering::palette::accent2());
@@ -239,6 +257,7 @@ class WaveDemo : public DemoBase {
     }
 
     PDE::Grid m_grid;
+    double m_pluck_period = 0.0, m_t = 0.0, m_next_pluck = 0.0;
     double m_center = 0.0, m_radius = 0.0;
     std::vector<char> m_inside;
     Eigen::VectorXd m_u, m_v;

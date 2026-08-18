@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Eigen/Sparse>
+#include <algorithm>
 #include <manifold/solver/conjugate_gradient_sle_solver.h>
 
 namespace manifold::FEA {
@@ -43,6 +44,17 @@ class Newmark {
     // the caller has to build f_int/K_eff at the same predictor this uses
     double beta() const { return m_beta; }
     double gamma() const { return m_gamma; }
+
+    // gamma > 0.5 buys algorithmic dissipation, and the matching
+    // beta = (gamma+1/2)^2/4 keeps the scheme unconditionally stable and
+    // second-order. it bites hardest at omega*dt >> 1, which is exactly the
+    // element-scale spectrum that refinement pushes past the corotational
+    // linearisation's validity
+    void set_dissipation(double gamma) {
+        m_gamma = std::max(0.5, gamma);
+        const double s = m_gamma + 0.5;
+        m_beta = 0.25 * s * s;
+    }
 
     void set_cg_max_iter(int v) { m_cg_max_iter = v; }
     void set_cg_rel_tol(double v) { m_cg_rel_tol = v; }
