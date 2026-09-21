@@ -1,8 +1,5 @@
 #pragma once
 
-#include "cells/cell_adapters.h"
-#include "cells/cylinder_flutter_cell.h"
-
 #include "ae_compress_demo.h"
 #include "aerofoil_flutter_demo.h"
 #include "cart_double_pendulum_demo.h"
@@ -10,6 +7,10 @@
 #include "collapse_demo.h"
 #include "fea_flutter_demo.h"
 #include "forecast_karman_demo.h"
+
+#include "cells/cell_adapters.h"
+#include "cells/cylinder_flutter_cell.h"
+
 #include "info_demo.h" // InfoFlutterCell, InfoCrank, InfoPendulum
 #include "jansen_demo.h"
 #include "nozzle_demo.h"
@@ -46,7 +47,6 @@ class StoryDemo : public DemoBase {
 
         build_groups();
         m_solo = std::clamp(m_solo, 0, (int)m_groups.size() - 1);
-
         rebuild_schedule();
     }
 

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <Eigen/Sparse>
+#include <cmath>
 #include <manifold/fea/assembler.h>
 #include <manifold/fea/boundary.h>
 #include <manifold/fea/element.h>
@@ -9,9 +11,7 @@
 #include <manifold/fea/material.h>
 #include <manifold/fea/mesh.h>
 
-#include <Eigen/Sparse>
 #include <algorithm>
-#include <cmath>
 #include <memory>
 #include <vector>
 
@@ -100,8 +100,8 @@ class ElasticBody : public FeaSolver {
     }
 
   private:
-    // warped tangent sum(Re*Ke*Re^T) and internal force sum(Re*Ke*(Re^T*p - x)),
-    // both evaluated at the displacement u
+    // warped tangent sum(Re*Ke*Re^T) and internal force sum(Re*Ke*(Re^T*p -
+    // x)), both evaluated at the displacement u
     void assemble_warped(const VectorXd &u, SparseMatrix<double> &K_eff,
                          VectorXd &f_int);
 

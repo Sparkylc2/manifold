@@ -1,7 +1,8 @@
 #pragma once
 
-#include "manifold/ai/conv_autoencoder.h"
-#include "manifold/ai/snapshot_recorder.h"
+#include <cmath>
+#include <cstdarg>
+#include <cstdio>
 #include <manifold/fluid/stable_fluid_solver.h>
 #include <manifold/renderer/demo_base.h>
 #include <manifold/renderer/field_view.h>
@@ -11,14 +12,14 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
-#include <cmath>
 #include <condition_variable>
-#include <cstdarg>
-#include <cstdio>
 #include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
+
+#include "manifold/ai/conv_autoencoder.h"
+#include "manifold/ai/snapshot_recorder.h"
 
 namespace manifold::Demo {
 
@@ -71,6 +72,8 @@ class CAEKarmanDemo : public DemoBase {
         stop_worker();
 
         m_fluid.clear();
+
+        m_fluid.set_channel(INFLOW);
         m_fluid.set_channel(INFLOW);
         const Vector2d o = m_fluid.origin();
         m_center = o + Vector2d(0.30 * W, 0.5 * H + 0.04);
@@ -345,24 +348,23 @@ class CAEKarmanDemo : public DemoBase {
             return;
         }
         constexpr int nc = CX * CY;
-        m_recon_field.render(r, rox, roy, CCELL,
-                             [this, vmax, rox, roy](double wx, double wy,
-                                                    double &val, double &a) {
-                                 const int i = (int)((wx - rox) / CCELL);
-                                 const int j = (int)((wy - roy) / CCELL);
-                                 if (i < 0 || i >= CX || j < 0 || j >= CY) {
-                                     a = 0.0;
-                                     return;
-                                 }
-                                 const int cc = i + j * CX;
-                                 const double u = m_recon[cc],
-                                              v = m_recon[nc + cc];
-                                 val = std::hypot(u, v) / vmax;
-                                 a = freestream_alpha(u, v) *
-                                     Rendering::window_alpha(
-                                         wx - rox, wy - roy, 0.0, 0.0, W, H,
-                                         EDGE_PAD);
-                             });
+        m_recon_field.render(
+            r, rox, roy, CCELL,
+            [this, vmax, rox, roy](double wx, double wy, double &val,
+                                   double &a) {
+                const int i = (int)((wx - rox) / CCELL);
+                const int j = (int)((wy - roy) / CCELL);
+                if (i < 0 || i >= CX || j < 0 || j >= CY) {
+                    a = 0.0;
+                    return;
+                }
+                const int cc = i + j * CX;
+                const double u = m_recon[cc], v = m_recon[nc + cc];
+                val = std::hypot(u, v) / vmax;
+                a = freestream_alpha(u, v) *
+                    Rendering::window_alpha(wx - rox, wy - roy, 0.0, 0.0, W, H,
+                                            EDGE_PAD);
+            });
         const Vector2d mc = m_center - o + Vector2d(rox, roy);
         r->draw_circle(mc.x(), mc.y(), RADIUS,
                        Rendering::palette::foreground());
